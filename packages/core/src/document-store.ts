@@ -33,6 +33,14 @@ export type WordBodyNode = WordParagraphNode | WordTableNode;
 export interface ExcelCell {
   value: string;
   formula?: string;
+  styleId?: string;
+}
+
+export interface ExcelWorkbookSettings {
+  date1904?: boolean;
+  codeName?: string;
+  filterPrivacy?: boolean;
+  showObjects?: string;
 }
 
 export interface ExcelSheet {
@@ -65,7 +73,11 @@ export interface OfficekitDocument {
     paragraphs?: WordParagraph[];
     tables?: WordTable[];
   };
-  excel?: { sheets: ExcelSheet[] };
+  excel?: {
+    sheets: ExcelSheet[];
+    settings?: ExcelWorkbookSettings;
+    styleSheetXml?: string;
+  };
   powerpoint?: { slides: PptSlide[] };
 }
 
@@ -414,6 +426,9 @@ function buildDocumentEntries(document: OfficekitDocument) {
       { name: "_rels/.rels", data: Buffer.from(renderExcelRels(), "utf8") },
       { name: "xl/workbook.xml", data: Buffer.from(renderWorkbookXml(document), "utf8") },
       { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(renderWorkbookRels(document), "utf8") },
+      ...(document.excel?.styleSheetXml
+        ? [{ name: "xl/styles.xml", data: Buffer.from(document.excel.styleSheetXml, "utf8") }]
+        : []),
       ...document.excel!.sheets.map((sheet, index) => ({ name: `xl/worksheets/sheet${index + 1}.xml`, data: Buffer.from(renderSheetXml(sheet), "utf8") })),
     ];
   }
@@ -645,12 +660,16 @@ function renderExcelContentTypes(document: OfficekitDocument) {
   const sheetOverrides = document.excel!.sheets
     .map((_, index) => `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`)
     .join("\n  ");
+  const stylesOverride = document.excel?.styleSheetXml
+    ? '\n  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+    : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   ${sheetOverrides}
+  ${stylesOverride}
 </Types>`;
 }
 
@@ -662,21 +681,43 @@ function renderExcelRels() {
 }
 
 function renderWorkbookXml(document: OfficekitDocument) {
+  const workbookPr = renderWorkbookProperties(document.excel?.settings);
   const sheets = document.excel!.sheets
     .map((sheet, index) => `<sheet name="${escapeXml(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`)
     .join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  ${workbookPr}
   <sheets>${sheets}</sheets>
 </workbook>`;
 }
 
 function renderWorkbookRels(document: OfficekitDocument) {
-  const rels = document.excel!.sheets
-    .map((_, index) => `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`)
-    .join("");
+  const rels = [
+    ...document.excel!.sheets.map(
+      (_, index) =>
+        `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`,
+    ),
+    ...(document.excel?.styleSheetXml
+      ? [`<Relationship Id="rId${document.excel!.sheets.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`]
+      : []),
+  ].join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
+}
+
+function renderWorkbookProperties(settings?: ExcelWorkbookSettings) {
+  if (!settings) {
+    return "";
+  }
+  const attrs = [
+    settings.date1904 !== undefined ? `date1904="${settings.date1904 ? 1 : 0}"` : "",
+    settings.codeName ? `codeName="${escapeXml(settings.codeName)}"` : "",
+    settings.filterPrivacy !== undefined ? `filterPrivacy="${settings.filterPrivacy ? 1 : 0}"` : "",
+    settings.showObjects ? `showObjects="${escapeXml(settings.showObjects)}"` : "",
+  ].filter(Boolean);
+
+  return attrs.length > 0 ? `<workbookPr ${attrs.join(" ")}/>` : "";
 }
 
 function renderSheetXml(sheet: ExcelSheet) {
@@ -696,11 +737,12 @@ function renderSheetXml(sheet: ExcelSheet) {
 }
 
 function renderExcelCellXml(ref: string, cell: ExcelCell) {
+  const styleAttr = cell.styleId ? ` s="${escapeXml(cell.styleId)}"` : "";
   if (cell.formula) {
     const valueXml = cell.value !== "" ? `<v>${escapeXml(cell.value)}</v>` : "";
-    return `<c r="${ref}"><f>${escapeXml(normalizeFormula(cell.formula))}</f>${valueXml}</c>`;
+    return `<c r="${ref}"${styleAttr}><f>${escapeXml(normalizeFormula(cell.formula))}</f>${valueXml}</c>`;
   }
-  return `<c r="${ref}" t="inlineStr"><is><t>${escapeXml(cell.value)}</t></is></c>`;
+  return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t>${escapeXml(cell.value)}</t></is></c>`;
 }
 
 function renderPptContentTypes(document: OfficekitDocument) {
@@ -820,6 +862,8 @@ function normalizeDocument(document: OfficekitDocument): OfficekitDocument {
           Object.entries(sheet.cells ?? {}).map(([ref, cell]) => [ref, normalizeExcelCell(cell)]),
         ),
       })),
+      ...(document.excel.settings ? { settings: document.excel.settings } : {}),
+      ...(document.excel.styleSheetXml ? { styleSheetXml: document.excel.styleSheetXml } : {}),
     };
   }
   return document;
@@ -862,6 +906,8 @@ function parseExcelDocument(zip: Map<string, Buffer>): OfficekitDocument {
   const workbookXml = requireEntry(zip, "xl/workbook.xml");
   const workbookRelsXml = requireEntry(zip, "xl/_rels/workbook.xml.rels");
   const relationshipMap = parseRelationships(workbookRelsXml);
+  const workbookSettings = parseWorkbookSettings(workbookXml);
+  const styleSheetXml = zip.get("xl/styles.xml")?.toString("utf8");
   const sheets = [...workbookXml.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/?>/g)].map((match) => {
     const name = decodeXml(match[1]);
     const target = relationshipMap.get(match[2]);
@@ -882,7 +928,11 @@ function parseExcelDocument(zip: Map<string, Buffer>): OfficekitDocument {
     format: "excel",
     version: 1,
     updatedAt: new Date().toISOString(),
-    excel: { sheets },
+    excel: {
+      sheets,
+      ...(Object.keys(workbookSettings).length > 0 ? { settings: workbookSettings } : {}),
+      ...(styleSheetXml ? { styleSheetXml } : {}),
+    },
   };
 }
 
@@ -1019,6 +1069,7 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
     const refMatch = /r="([^"]+)"/.exec(attributes);
     if (!refMatch) continue;
     const ref = refMatch[1].toUpperCase();
+    const styleId = /s="([^"]+)"/.exec(attributes)?.[1];
     const typeMatch = /t="([^"]+)"/.exec(attributes);
     const type = typeMatch?.[1] ?? "";
     const formula = (/<f\b[^>]*>([\s\S]*?)<\/f>/.exec(body)?.[1] ?? "").trim();
@@ -1033,10 +1084,28 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
     }
     cells[ref] = {
       value,
+      ...(styleId ? { styleId } : {}),
       ...(formula ? { formula: decodeXml(formula) } : {}),
     };
   }
   return cells;
+}
+
+function parseWorkbookSettings(xml: string): ExcelWorkbookSettings {
+  const attrs = /<workbookPr\b([^>]*)\/?>/.exec(xml)?.[1];
+  if (!attrs) {
+    return {};
+  }
+  const date1904 = /date1904="([^"]+)"/.exec(attrs)?.[1];
+  const codeName = /codeName="([^"]+)"/.exec(attrs)?.[1];
+  const filterPrivacy = /filterPrivacy="([^"]+)"/.exec(attrs)?.[1];
+  const showObjects = /showObjects="([^"]+)"/.exec(attrs)?.[1];
+  return {
+    ...(date1904 !== undefined ? { date1904: date1904 === "1" || date1904.toLowerCase() === "true" } : {}),
+    ...(codeName ? { codeName: decodeXml(codeName) } : {}),
+    ...(filterPrivacy !== undefined ? { filterPrivacy: filterPrivacy === "1" || filterPrivacy.toLowerCase() === "true" } : {}),
+    ...(showObjects ? { showObjects: decodeXml(showObjects) } : {}),
+  };
 }
 
 function parseSharedStrings(zip: Map<string, Buffer>) {
@@ -1090,6 +1159,7 @@ function normalizeExcelCell(cell: string | ExcelCell | undefined): ExcelCell {
   }
   return {
     value: cell?.value ?? "",
+    ...(cell?.styleId ? { styleId: cell.styleId } : {}),
     ...(cell?.formula ? { formula: normalizeFormula(cell.formula) } : {}),
   };
 }
@@ -1097,8 +1167,10 @@ function normalizeExcelCell(cell: string | ExcelCell | undefined): ExcelCell {
 function mergeExcelCell(existing: string | ExcelCell | undefined, props: Record<string, string>): ExcelCell {
   const base = normalizeExcelCell(existing);
   const formula = props.formula === undefined ? base.formula : normalizeFormula(props.formula);
+  const styleId = props.styleId ?? props.style ?? base.styleId;
   return {
     value: props.value ?? props.text ?? base.value,
+    ...(styleId ? { styleId } : {}),
     ...(formula ? { formula } : {}),
   };
 }
