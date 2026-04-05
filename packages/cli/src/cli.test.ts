@@ -233,6 +233,37 @@ describe("officekit CLI scaffold", () => {
     expect(stylesXml).toContain("<cellXfs");
   });
 
+  test("sets workbook settings on officekit-created workbooks", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-settings-create-"));
+    const filePath = path.join(dir, "workbook-settings.xlsx");
+    await runCli(["create", filePath]);
+    await runCli([
+      "set",
+      filePath,
+      "/workbook",
+      "--prop",
+      "date1904=true",
+      "--prop",
+      "codeName=OfficekitBook",
+      "--prop",
+      "filterPrivacy=true",
+      "--prop",
+      "showObjects=all",
+    ]);
+
+    const workbook = await runCli(["get", filePath, "/workbook", "--json"]);
+    const workbookXml = readStoredZip(await readFile(filePath)).get("xl/workbook.xml")!.toString("utf8");
+
+    expect(workbook.stdout).toContain('"date1904": true');
+    expect(workbook.stdout).toContain('"codeName": "OfficekitBook"');
+    expect(workbook.stdout).toContain('"filterPrivacy": true');
+    expect(workbook.stdout).toContain('"showObjects": "all"');
+    expect(workbookXml).toContain('date1904="1"');
+    expect(workbookXml).toContain('codeName="OfficekitBook"');
+    expect(workbookXml).toContain('filterPrivacy="1"');
+    expect(workbookXml).toContain('showObjects="all"');
+  });
+
   test("reads and mutates a metadata-free standard PowerPoint OOXML file", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-ppt-fallback-"));
     const filePath = path.join(dir, "fallback.pptx");

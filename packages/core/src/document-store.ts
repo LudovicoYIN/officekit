@@ -176,8 +176,13 @@ export async function setDocumentNode(filePath: string, targetPath: string, opti
       );
     }
   } else if (document.format === "excel") {
+    if (targetPath === "/" || targetPath === "/workbook") {
+      document.excel ??= { sheets: [], settings: {} };
+      document.excel.settings = mergeWorkbookSettings(document.excel.settings, options.props);
+    } else {
     const { sheet, cellRef } = resolveExcelPath(document, targetPath);
-    sheet.cells[cellRef] = mergeExcelCell(sheet.cells[cellRef], options.props);
+      sheet.cells[cellRef] = mergeExcelCell(sheet.cells[cellRef], options.props);
+    }
   } else {
     const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
     const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
@@ -1177,4 +1182,30 @@ function mergeExcelCell(existing: string | ExcelCell | undefined, props: Record<
 
 function normalizeFormula(formula: string) {
   return formula.replace(/^=/, "");
+}
+
+function mergeWorkbookSettings(
+  existing: ExcelWorkbookSettings | undefined,
+  props: Record<string, string>,
+): ExcelWorkbookSettings {
+  const next: ExcelWorkbookSettings = { ...(existing ?? {}) };
+
+  if (props.date1904 !== undefined) {
+    next.date1904 = isTruthy(props.date1904);
+  }
+  if (props.codeName !== undefined || props.codename !== undefined) {
+    next.codeName = props.codeName ?? props.codename;
+  }
+  if (props.filterPrivacy !== undefined || props.filterprivacy !== undefined) {
+    next.filterPrivacy = isTruthy(props.filterPrivacy ?? props.filterprivacy ?? "false");
+  }
+  if (props.showObjects !== undefined || props.showobjects !== undefined) {
+    next.showObjects = (props.showObjects ?? props.showobjects)?.toLowerCase();
+  }
+
+  return next;
+}
+
+function isTruthy(value: string) {
+  return /^(1|true|yes|on)$/i.test(value.trim());
 }
