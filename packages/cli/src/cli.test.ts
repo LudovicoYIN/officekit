@@ -301,6 +301,55 @@ describe("officekit CLI scaffold", () => {
     expect(workbookXml).toContain('lockStructure="1"');
   });
 
+  test("keeps workbook settings, styles.xml, formula cells, and style ids together on styled fallback workbooks", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-styled-formula-fallback-"));
+    const filePath = path.join(dir, "styled-formula-fallback.xlsx");
+    await writeFile(filePath, buildExternalExcelStyledFormulaZip());
+
+    const beforeWorkbook = await runCli(["get", filePath, "/workbook", "--json"]);
+    const beforeCell = await runCli(["get", filePath, "/Sheet1/B1", "--json"]);
+
+    await runCli([
+      "set",
+      filePath,
+      "/workbook",
+      "--prop",
+      "calc.iterateCount=77",
+      "--prop",
+      "workbook.lockStructure=true",
+    ]);
+    await runCli([
+      "set",
+      filePath,
+      "/Sheet1/B1",
+      "--prop",
+      "value=34",
+      "--prop",
+      "formula==SUM(A1:A1)",
+    ]);
+
+    const afterCell = await runCli(["get", filePath, "/Sheet1/B1", "--json"]);
+    const zip = readStoredZip(await readFile(filePath));
+    const workbookXml = zip.get("xl/workbook.xml")!.toString("utf8");
+    const stylesXml = zip.get("xl/styles.xml")!.toString("utf8");
+    const sheetXml = zip.get("xl/worksheets/sheet1.xml")!.toString("utf8");
+
+    expect(beforeWorkbook.stdout).toContain('"date1904": true');
+    expect(beforeWorkbook.stdout).toContain('"calcMode": "autoNoTable"');
+    expect(beforeCell.stdout).toContain('"styleId": "1"');
+    expect(beforeCell.stdout).toContain('"formula": "SUM(A1:A1)"');
+    expect(afterCell.stdout).toContain('"styleId": "1"');
+    expect(afterCell.stdout).toContain('"formula": "SUM(A1:A1)"');
+    expect(afterCell.stdout).toContain('"value": "34"');
+    expect(workbookXml).toContain('calcMode="autoNoTable"');
+    expect(workbookXml).toContain('iterateCount="77"');
+    expect(workbookXml).toContain('lockStructure="1"');
+    expect(stylesXml).toContain("<cellXfs");
+    expect(sheetXml).toContain(' s="1"');
+    expect(sheetXml).toContain("<f>SUM(A1:A1)</f>");
+    expect(sheetXml).toContain("<v>34</v>");
+  });
+
   test("reads and mutates a metadata-free standard PowerPoint OOXML file", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-ppt-fallback-"));
     const filePath = path.join(dir, "fallback.pptx");
@@ -673,6 +722,70 @@ function buildExternalExcelExtendedSettingsZip() {
       data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData></sheetData>
+</worksheet>`),
+    },
+  ]);
+}
+
+function buildExternalExcelStyledFormulaZip() {
+  return createStoredZip([
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`),
+    },
+    {
+      name: "_rels/.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/workbook.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <workbookPr date1904="1" codeName="WorkbookCode" filterPrivacy="1" showObjects="all" backupFile="1" dateCompatibility="1"/>
+  <workbookProtection lockStructure="1" lockWindows="1"/>
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+  <calcPr calcMode="autoNoTable" iterate="1" iterateCount="5" iterateDelta="0.001" fullPrecision="1" fullCalcOnLoad="1" refMode="R1C1"/>
+</workbook>`),
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/styles.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
+  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
+  <borders count="1"><border/></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs>
+</styleSheet>`),
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">
+      <c r="A1"><v>34</v></c>
+      <c r="B1" s="1"><f>SUM(A1:A1)</f><v>34</v></c>
+    </row>
+  </sheetData>
 </worksheet>`),
     },
   ]);
