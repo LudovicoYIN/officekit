@@ -1,0 +1,9 @@
+{
+  "name": "@officekit/install",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.js",
+  "scripts": {
+    "test": "bun test"
+  }
+}
