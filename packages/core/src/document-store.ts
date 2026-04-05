@@ -959,7 +959,7 @@ function parseExcelDocument(zip: Map<string, Buffer>): OfficekitDocument {
   const relationshipMap = parseRelationships(workbookRelsXml);
   const workbookSettings = parseWorkbookSettings(workbookXml);
   const styleSheetXml = zip.get("xl/styles.xml")?.toString("utf8");
-  const sheets = [...workbookXml.matchAll(/<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/?>/g)].map((match) => {
+  const sheets = [...workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/?>/g)].map((match) => {
     const name = decodeXml(match[1]);
     const target = relationshipMap.get(match[2]);
     if (!target) {
@@ -1114,7 +1114,7 @@ function readRelationships(zip: Map<string, Buffer>, entryName: string) {
 function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
   const sharedStrings = parseSharedStrings(zip);
   const cells: Record<string, ExcelCell> = {};
-  for (const match of xml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+  for (const match of xml.matchAll(/<(?:\w+:)?c\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?c>/g)) {
     const attributes = match[1];
     const body = match[2];
     const refMatch = /r="([^"]+)"/.exec(attributes);
@@ -1123,15 +1123,15 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
     const styleId = /s="([^"]+)"/.exec(attributes)?.[1];
     const typeMatch = /t="([^"]+)"/.exec(attributes);
     const type = typeMatch?.[1] ?? "";
-    const formula = (/<f\b[^>]*>([\s\S]*?)<\/f>/.exec(body)?.[1] ?? "").trim();
+    const formula = (/<(?:\w+:)?f\b[^>]*>([\s\S]*?)<\/(?:\w+:)?f>/.exec(body)?.[1] ?? "").trim();
     let value = "";
     if (type === "inlineStr") {
       value = extractTexts(body).join("");
     } else if (type === "s") {
-      const index = Number((/<v>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? "0").trim());
+      const index = Number((/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/.exec(body)?.[1] ?? "0").trim());
       value = sharedStrings[index] ?? "";
     } else {
-      value = decodeXml((/<v>([\s\S]*?)<\/v>/.exec(body)?.[1] ?? "").trim());
+      value = decodeXml((/<(?:\w+:)?v>([\s\S]*?)<\/(?:\w+:)?v>/.exec(body)?.[1] ?? "").trim());
     }
     cells[ref] = {
       value,
@@ -1143,9 +1143,9 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
 }
 
 function parseWorkbookSettings(xml: string): ExcelWorkbookSettings {
-  const attrs = /<workbookPr\b([^>]*)\/?>/.exec(xml)?.[1];
-  const calcAttrs = /<calcPr\b([^>]*)\/?>/.exec(xml)?.[1];
-  const protectionAttrs = /<workbookProtection\b([^>]*)\/?>/.exec(xml)?.[1];
+  const attrs = /<(?:\w+:)?workbookPr\b([^>]*)\/?>/.exec(xml)?.[1];
+  const calcAttrs = /<(?:\w+:)?calcPr\b([^>]*)\/?>/.exec(xml)?.[1];
+  const protectionAttrs = /<(?:\w+:)?workbookProtection\b([^>]*)\/?>/.exec(xml)?.[1];
   return {
     ...parseWorkbookPropertyAttributes(attrs),
     ...parseCalculationPropertyAttributes(calcAttrs),
@@ -1156,7 +1156,7 @@ function parseWorkbookSettings(xml: string): ExcelWorkbookSettings {
 function parseSharedStrings(zip: Map<string, Buffer>) {
   const shared = zip.get("xl/sharedStrings.xml");
   if (!shared) return [];
-  return [...shared.toString("utf8").matchAll(/<si\b[\s\S]*?<\/si>/g)].map((match) => extractTexts(match[0]).join(""));
+  return [...shared.toString("utf8").matchAll(/<(?:\w+:)?si\b[\s\S]*?<\/(?:\w+:)?si>/g)].map((match) => extractTexts(match[0]).join(""));
 }
 
 function extractTextRuns(xml: string) {
