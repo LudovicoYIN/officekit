@@ -8,6 +8,10 @@ export interface WordParagraph {
   text: string;
 }
 
+export interface WordParagraphNode extends WordParagraph {
+  type: "paragraph";
+}
+
 export interface WordTableCell {
   text: string;
 }
@@ -20,6 +24,12 @@ export interface WordTable {
   rows: WordTableRow[];
 }
 
+export interface WordTableNode extends WordTable {
+  type: "table";
+}
+
+export type WordBodyNode = WordParagraphNode | WordTableNode;
+
 export interface ExcelSheet {
   name: string;
   cells: Record<string, string>;
@@ -27,10 +37,15 @@ export interface ExcelSheet {
 
 export interface PptShape {
   text: string;
+  kind?: string;
+  name?: string;
 }
 
 export interface PptSlide {
   title: string;
+  layoutName?: string;
+  layoutType?: string;
+  themeName?: string;
   shapes: PptShape[];
 }
 
@@ -40,7 +55,11 @@ export interface OfficekitDocument {
   format: SupportedFormat;
   version: 1;
   updatedAt: string;
-  word?: { paragraphs: WordParagraph[]; tables: WordTable[] };
+  word?: {
+    body: WordBodyNode[];
+    paragraphs?: WordParagraph[];
+    tables?: WordTable[];
+  };
   excel?: { sheets: ExcelSheet[] };
   powerpoint?: { slides: PptSlide[] };
 }
@@ -70,17 +89,13 @@ export async function addDocumentNode(filePath: string, targetPath: string, opti
         throw new UsageError("Word add currently supports only /body.", "Use /body with --type paragraph or --type table.");
       }
       if (options.type === "paragraph") {
-        document.word!.paragraphs.push({ text: options.props.text ?? "" });
+        document.word!.body.push(createWordParagraph(options.props.text ?? ""));
         break;
       }
       if (options.type === "table") {
         const rows = Math.max(1, Number(options.props.rows ?? "2"));
         const cols = Math.max(1, Number(options.props.cols ?? "2"));
-        document.word!.tables.push({
-          rows: Array.from({ length: rows }, () => ({
-            cells: Array.from({ length: cols }, () => ({ text: "" })),
-          })),
-        });
+        document.word!.body.push(createWordTable(rows, cols));
         break;
       }
       throw new UsageError(
@@ -123,11 +138,11 @@ export async function setDocumentNode(filePath: string, targetPath: string, opti
     const match = /^\/body\/p\[(\d+)\]$/.exec(targetPath);
     const tableMatch = /^\/body\/table\[(\d+)\]\/cell\[(\d+),(\d+)\]$/.exec(targetPath);
     if (match) {
-      const paragraph = document.word!.paragraphs[Number(match[1]) - 1];
+      const paragraph = resolveWordParagraph(document, Number(match[1]));
       if (!paragraph) throw new OfficekitError(`Paragraph ${match[1]} does not exist.`, "not_found");
       paragraph.text = options.props.text ?? paragraph.text;
     } else if (tableMatch) {
-      const table = document.word!.tables[Number(tableMatch[1]) - 1];
+      const table = resolveWordTable(document, Number(tableMatch[1]));
       const row = table?.rows[Number(tableMatch[2]) - 1];
       const cell = row?.cells[Number(tableMatch[3]) - 1];
       if (!cell) {
@@ -174,9 +189,9 @@ export async function removeDocumentNode(filePath: string, targetPath: string) {
     const match = /^\/body\/p\[(\d+)\]$/.exec(targetPath);
     const tableMatch = /^\/body\/table\[(\d+)\]$/.exec(targetPath);
     if (match) {
-      document.word!.paragraphs.splice(Number(match[1]) - 1, 1);
+      removeWordBodyNode(document, "paragraph", Number(match[1]));
     } else if (tableMatch) {
-      document.word!.tables.splice(Number(tableMatch[1]) - 1, 1);
+      removeWordBodyNode(document, "table", Number(tableMatch[1]));
     } else {
       throw new UsageError("Word remove currently supports /body/p[n] or /body/table[n].");
     }
@@ -247,9 +262,9 @@ export async function rawDocument(filePath: string) {
 
 export function renderDocumentHtml(document: OfficekitDocument): string {
   if (document.format === "word") {
-    const paragraphs = document.word!.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph.text)}</p>`);
-    const tables = document.word!.tables.map((table) => renderWordTableHtml(table));
-    const body = [...paragraphs, ...tables].join("\n") || "<p><em>Empty document</em></p>";
+    const body = document.word!.body
+      .map((node) => (node.type === "paragraph" ? `<p>${escapeHtml(node.text)}</p>` : renderWordTableHtml(node)))
+      .join("\n") || "<p><em>Empty document</em></p>";
     return `<article data-format="word">${body}</article>`;
   }
 
@@ -265,14 +280,20 @@ export function renderDocumentHtml(document: OfficekitDocument): string {
 export function renderDocumentOutline(document: OfficekitDocument): string {
   if (document.format === "word") {
     const lines: string[] = [];
-    for (const [index, paragraph] of document.word!.paragraphs.entries()) {
-      lines.push(`Paragraph ${index + 1}: ${paragraph.text}`);
-    }
-    for (const [tableIndex, table] of document.word!.tables.entries()) {
-      const rowCount = table.rows.length;
-      const colCount = table.rows[0]?.cells.length ?? 0;
-      lines.push(`Table ${tableIndex + 1}: ${rowCount}x${colCount}`);
-      for (const [rowIndex, row] of table.rows.entries()) {
+    let paragraphIndex = 0;
+    let tableIndex = 0;
+    for (const node of document.word!.body) {
+      if (node.type === "paragraph") {
+        paragraphIndex += 1;
+        lines.push(`Paragraph ${paragraphIndex}: ${node.text}`);
+        continue;
+      }
+
+      tableIndex += 1;
+      const rowCount = node.rows.length;
+      const colCount = node.rows[0]?.cells.length ?? 0;
+      lines.push(`Table ${tableIndex}: ${rowCount}x${colCount}`);
+      for (const [rowIndex, row] of node.rows.entries()) {
         for (const [cellIndex, cell] of row.cells.entries()) {
           lines.push(`  R${rowIndex + 1}C${cellIndex + 1}: ${cell.text}`);
         }
@@ -337,7 +358,7 @@ function createBlankDocument(format: SupportedFormat): OfficekitDocument {
     version: 1 as const,
     updatedAt: new Date().toISOString(),
   };
-  if (format === "word") return { ...base, word: { paragraphs: [], tables: [] } };
+  if (format === "word") return { ...base, word: { body: [] } };
   if (format === "excel") return { ...base, excel: { sheets: [{ name: "Sheet1", cells: {} as Record<string, string> }] } };
   return { ...base, powerpoint: { slides: [] as PptSlide[] } };
 }
@@ -402,22 +423,28 @@ function materializePath(document: OfficekitDocument, targetPath: string) {
   }
 
   if (document.format === "word") {
-    if (targetPath === "/body") return document.word;
+    if (targetPath === "/body") {
+      return {
+        body: document.word!.body,
+        paragraphs: getWordParagraphs(document),
+        tables: getWordTables(document),
+      };
+    }
     const match = /^\/body\/p\[(\d+)\]$/.exec(targetPath);
     const tableMatch = /^\/body\/table\[(\d+)\]$/.exec(targetPath);
     const tableCellMatch = /^\/body\/table\[(\d+)\]\/cell\[(\d+),(\d+)\]$/.exec(targetPath);
     if (match) {
-      const paragraph = document.word!.paragraphs[Number(match[1]) - 1];
+      const paragraph = resolveWordParagraph(document, Number(match[1]));
       if (!paragraph) throw new OfficekitError(`Paragraph ${match[1]} does not exist.`, "not_found");
       return paragraph;
     }
     if (tableMatch) {
-      const table = document.word!.tables[Number(tableMatch[1]) - 1];
+      const table = resolveWordTable(document, Number(tableMatch[1]));
       if (!table) throw new OfficekitError(`Table ${tableMatch[1]} does not exist.`, "not_found");
       return table;
     }
     if (tableCellMatch) {
-      const table = document.word!.tables[Number(tableCellMatch[1]) - 1];
+      const table = resolveWordTable(document, Number(tableCellMatch[1]));
       const row = table?.rows[Number(tableCellMatch[2]) - 1];
       const cell = row?.cells[Number(tableCellMatch[3]) - 1];
       if (!cell) {
@@ -486,6 +513,89 @@ function resolveSlide(document: OfficekitDocument, targetPath: string) {
   return slide;
 }
 
+function createWordParagraph(text: string): WordParagraphNode {
+  return {
+    type: "paragraph",
+    text,
+  };
+}
+
+function createWordTable(rows: number, cols: number): WordTableNode {
+  return {
+    type: "table",
+    rows: Array.from({ length: rows }, () => ({
+      cells: Array.from({ length: cols }, () => ({ text: "" })),
+    })),
+  };
+}
+
+function normalizeWordState(word: NonNullable<OfficekitDocument["word"]>) {
+  if (word.body?.length) {
+    return {
+      body: word.body.map((node) => normalizeWordBodyNode(node)),
+    };
+  }
+
+  return {
+    body: [
+      ...(word.paragraphs ?? []).map((paragraph) => createWordParagraph(paragraph.text ?? "")),
+      ...(word.tables ?? []).map((table) => normalizeWordTableNode(table)),
+    ],
+  };
+}
+
+function normalizeWordBodyNode(node: WordBodyNode | WordParagraph | WordTable) {
+  if ("type" in node && node.type === "table") {
+    return normalizeWordTableNode(node);
+  }
+  if ("type" in node && node.type === "paragraph") {
+    return createWordParagraph(node.text ?? "");
+  }
+  if ("rows" in node) {
+    return normalizeWordTableNode(node);
+  }
+  return createWordParagraph(node.text ?? "");
+}
+
+function normalizeWordTableNode(table: WordTable): WordTableNode {
+  return {
+    type: "table",
+    rows: (table.rows ?? []).map((row) => ({
+      cells: (row.cells ?? []).map((cell) => ({ text: cell.text ?? "" })),
+    })),
+  };
+}
+
+function getWordParagraphs(document: OfficekitDocument): WordParagraphNode[] {
+  return document.word!.body.filter((node): node is WordParagraphNode => node.type === "paragraph");
+}
+
+function getWordTables(document: OfficekitDocument): WordTableNode[] {
+  return document.word!.body.filter((node): node is WordTableNode => node.type === "table");
+}
+
+function resolveWordParagraph(document: OfficekitDocument, index: number) {
+  return getWordParagraphs(document)[index - 1];
+}
+
+function resolveWordTable(document: OfficekitDocument, index: number) {
+  return getWordTables(document)[index - 1];
+}
+
+function removeWordBodyNode(document: OfficekitDocument, type: WordBodyNode["type"], index: number) {
+  let seen = 0;
+  const bodyIndex = document.word!.body.findIndex((node) => {
+    if (node.type !== type) return false;
+    seen += 1;
+    return seen === index;
+  });
+  if (bodyIndex === -1) {
+    const label = type === "paragraph" ? "Paragraph" : "Table";
+    throw new OfficekitError(`${label} ${index} does not exist.`, "not_found");
+  }
+  document.word!.body.splice(bodyIndex, 1);
+}
+
 function renderWordContentTypes() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -503,15 +613,17 @@ function renderWordRels() {
 }
 
 function renderWordDocumentXml(document: OfficekitDocument) {
-  const paragraphs = document.word!.paragraphs
-    .map((paragraph) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(paragraph.text)}</w:t></w:r></w:p>`)
+  const body = document.word!.body
+    .map((node) => (
+      node.type === "paragraph"
+        ? `<w:p><w:r><w:t xml:space="preserve">${escapeXml(node.text)}</w:t></w:r></w:p>`
+        : renderWordTableXml(node)
+    ))
     .join("");
-  const tables = document.word!.tables.map((table) => renderWordTableXml(table)).join("");
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>
-    ${paragraphs}
-    ${tables}
+    ${body}
     <w:sectPr/>
   </w:body>
 </w:document>`;
@@ -678,10 +790,7 @@ function parseExternalDocument(zip: Map<string, Buffer>, filePath: string): Offi
 
 function normalizeDocument(document: OfficekitDocument): OfficekitDocument {
   if (document.word) {
-    document.word = {
-      paragraphs: document.word.paragraphs ?? [],
-      tables: document.word.tables ?? [],
-    };
+    document.word = normalizeWordState(document.word);
   }
   return document;
 }
@@ -689,16 +798,13 @@ function normalizeDocument(document: OfficekitDocument): OfficekitDocument {
 function parseWordDocument(zip: Map<string, Buffer>): OfficekitDocument {
   const xml = requireEntry(zip, "word/document.xml");
   const body = /<w:body\b[^>]*>([\s\S]*?)<w:sectPr\b[^>]*\/?>/.exec(xml)?.[1] ?? "";
-  const paragraphs: WordParagraph[] = [];
-  const tables: WordTable[] = [];
+  const bodyNodes: WordBodyNode[] = [];
   for (const match of body.matchAll(/<w:(p|tbl)\b[\s\S]*?<\/w:\1>/g)) {
     if (match[1] === "p") {
       const text = extractTextRuns(match[0]);
-      if (text.length > 0) {
-        paragraphs.push({ text });
-      }
+      bodyNodes.push(createWordParagraph(text));
     } else {
-      tables.push(parseWordTable(match[0]));
+      bodyNodes.push(parseWordTable(match[0]));
     }
   }
   return {
@@ -708,19 +814,18 @@ function parseWordDocument(zip: Map<string, Buffer>): OfficekitDocument {
     version: 1,
     updatedAt: new Date().toISOString(),
     word: {
-      paragraphs,
-      tables,
+      body: bodyNodes,
     },
   };
 }
 
-function parseWordTable(xml: string): WordTable {
+function parseWordTable(xml: string): WordTableNode {
   const rows = [...xml.matchAll(/<w:tr\b[\s\S]*?<\/w:tr>/g)].map((rowMatch) => ({
     cells: [...rowMatch[0].matchAll(/<w:tc\b[\s\S]*?<\/w:tc>/g)].map((cellMatch) => ({
       text: extractTextRuns(cellMatch[0]),
     })),
   }));
-  return { rows };
+  return { type: "table", rows };
 }
 
 function parseExcelDocument(zip: Map<string, Buffer>): OfficekitDocument {
@@ -760,12 +865,16 @@ function parsePowerPointDocument(zip: Map<string, Buffer>): OfficekitDocument {
     if (!target) {
       throw new OfficekitError(`Presentation relationship '${match[1]}' is missing.`, "invalid_ooxml");
     }
-    const slideXml = requireEntry(zip, normalizeZipPath("ppt", target));
-    const texts = [...slideXml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map((textMatch) => decodeXml(textMatch[1]));
-    const [title = "Untitled slide", ...shapeTexts] = texts;
+    const slideEntryName = normalizeZipPath("ppt", target);
+    const slideXml = requireEntry(zip, slideEntryName);
+    const { title, shapes } = parsePowerPointSlide(slideXml);
+    const { layoutName, layoutType, themeName } = parseSlideContext(zip, slideEntryName);
     return {
       title,
-      shapes: shapeTexts.filter(Boolean).map((text) => ({ text })),
+      layoutName,
+      layoutType,
+      themeName,
+      shapes,
     };
   });
 
@@ -781,15 +890,94 @@ function parsePowerPointDocument(zip: Map<string, Buffer>): OfficekitDocument {
 
 function parseRelationships(xml: string) {
   const relationships = new Map<string, string>();
+  for (const relationship of parseRelationshipEntries(xml)) {
+    relationships.set(relationship.id, relationship.target);
+  }
+  return relationships;
+}
+
+function parseRelationshipEntries(xml: string) {
+  const relationships: Array<{ id: string; target: string; type?: string }> = [];
   for (const match of xml.matchAll(/<Relationship\b([^>]*)\/?>/g)) {
     const attributes = match[1];
     const id = /Id="([^"]+)"/.exec(attributes)?.[1];
     const target = /Target="([^"]+)"/.exec(attributes)?.[1];
+    const type = /Type="([^"]+)"/.exec(attributes)?.[1];
     if (id && target) {
-      relationships.set(id, target);
+      relationships.push({ id, target, type });
     }
   }
   return relationships;
+}
+
+function parsePowerPointSlide(xml: string) {
+  const shapes = [...xml.matchAll(/<p:sp\b[\s\S]*?<\/p:sp>/g)]
+    .map((match) => parsePowerPointShape(match[0]))
+    .filter((shape): shape is PptShape => shape !== null);
+  const titleIndex =
+    shapes.findIndex((shape) => shape.kind === "title" || shape.kind === "ctrTitle") ??
+    -1;
+  const fallbackTitleIndex = titleIndex >= 0 ? titleIndex : 0;
+  const title = shapes[fallbackTitleIndex]?.text ?? "Untitled slide";
+  return {
+    title,
+    shapes: shapes.filter((_, index) => index !== fallbackTitleIndex),
+  };
+}
+
+function parsePowerPointShape(xml: string): PptShape | null {
+  const text = extractTextRuns(xml).trim();
+  if (!text) {
+    return null;
+  }
+  const name = /<p:cNvPr\b[^>]*name="([^"]*)"/.exec(xml)?.[1];
+  const kind = /<p:ph\b[^>]*type="([^"]+)"/.exec(xml)?.[1];
+  return {
+    text,
+    kind,
+    name: name ? decodeXml(name) : undefined,
+  };
+}
+
+function parseSlideContext(zip: Map<string, Buffer>, slideEntryName: string) {
+  const slideRels = readRelationships(zip, getRelationshipsEntryName(slideEntryName));
+  const layoutTarget = slideRels.find((relationship) => relationship.type?.endsWith("/slideLayout"))?.target;
+  if (!layoutTarget) {
+    return {};
+  }
+
+  const layoutEntryName = normalizeZipPath(path.posix.dirname(slideEntryName), layoutTarget);
+  const layoutXml = requireEntry(zip, layoutEntryName);
+  const layoutName = decodeXml(/<p:cSld\b[^>]*name="([^"]*)"/.exec(layoutXml)?.[1] ?? "");
+  const layoutType = /<p:sldLayout\b[^>]*type="([^"]+)"/.exec(layoutXml)?.[1];
+  const layoutRels = readRelationships(zip, getRelationshipsEntryName(layoutEntryName));
+  const masterTarget = layoutRels.find((relationship) => relationship.type?.endsWith("/slideMaster"))?.target;
+  const themeName = masterTarget ? parseThemeName(zip, layoutEntryName, masterTarget) : undefined;
+
+  return {
+    layoutName: layoutName || undefined,
+    layoutType,
+    themeName,
+  };
+}
+
+function parseThemeName(zip: Map<string, Buffer>, layoutEntryName: string, masterTarget: string) {
+  const masterEntryName = normalizeZipPath(path.posix.dirname(layoutEntryName), masterTarget);
+  const masterRels = readRelationships(zip, getRelationshipsEntryName(masterEntryName));
+  const themeTarget = masterRels.find((relationship) => relationship.type?.endsWith("/theme"))?.target;
+  if (!themeTarget) {
+    return undefined;
+  }
+  const themeXml = requireEntry(zip, normalizeZipPath(path.posix.dirname(masterEntryName), themeTarget));
+  return decodeXml(/<a:theme\b[^>]*name="([^"]*)"/.exec(themeXml)?.[1] ?? "") || undefined;
+}
+
+function readRelationships(zip: Map<string, Buffer>, entryName: string) {
+  const rels = zip.get(entryName);
+  if (!rels) {
+    return [];
+  }
+  return parseRelationshipEntries(rels.toString("utf8"));
 }
 
 function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
@@ -837,6 +1025,12 @@ function normalizeZipPath(baseDir: string, target: string) {
     return path.posix.normalize(normalized.slice(1));
   }
   return path.posix.normalize(path.posix.join(baseDir, normalized));
+}
+
+function getRelationshipsEntryName(entryName: string) {
+  const directory = path.posix.dirname(entryName);
+  const basename = path.posix.basename(entryName);
+  return path.posix.join(directory, "_rels", `${basename}.rels`);
 }
 
 function requireEntry(zip: Map<string, Buffer>, entryName: string) {

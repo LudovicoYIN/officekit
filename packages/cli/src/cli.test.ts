@@ -57,6 +57,31 @@ describe("officekit CLI scaffold", () => {
     expect(html.stdout).toContain("Cell 11");
   });
 
+  test("preserves paragraph and table order in created Word documents", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-word-ordered-"));
+    const filePath = path.join(dir, "ordered.docx");
+    await runCli(["create", filePath]);
+    await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Intro"]);
+    await runCli(["add", filePath, "/body", "--type", "table", "--prop", "rows=1", "--prop", "cols=2"]);
+    await runCli(["set", filePath, "/body/table[1]/cell[1,1]", "--prop", "text=Cell A"]);
+    await runCli(["set", filePath, "/body/table[1]/cell[1,2]", "--prop", "text=Cell B"]);
+    await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Outro"]);
+
+    const outline = await runCli(["view", filePath, "outline"]);
+    const html = await runCli(["view", filePath, "html"]);
+    const xml = readStoredZip(await readFile(filePath)).get("word/document.xml")!.toString("utf8");
+    const outlineText = outline.stdout ?? "";
+    const htmlText = html.stdout ?? "";
+
+    expect(outline.exitCode).toBe(0);
+    expect(outlineText.indexOf("Paragraph 1: Intro")).toBeLessThan(outlineText.indexOf("Table 1: 1x2"));
+    expect(outlineText.indexOf("Table 1: 1x2")).toBeLessThan(outlineText.indexOf("Paragraph 2: Outro"));
+    expect(htmlText.indexOf("<p>Intro</p>")).toBeLessThan(htmlText.indexOf("<table>"));
+    expect(htmlText.indexOf("<table>")).toBeLessThan(htmlText.indexOf("<p>Outro</p>"));
+    expect(xml.indexOf("Intro")).toBeLessThan(xml.indexOf("<w:tbl>"));
+    expect(xml.indexOf("<w:tbl>")).toBeLessThan(xml.indexOf("Outro"));
+  });
+
   test("creates and mutates an Excel document vertical slice", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-"));
     const filePath = path.join(dir, "demo.xlsx");
@@ -103,6 +128,27 @@ describe("officekit CLI scaffold", () => {
     await runCli(["set", filePath, "/body/table[1]/cell[1,2]", "--prop", "text=Updated"]);
     const after = await runCli(["get", filePath, "/body/table[1]/cell[1,2]", "--json"]);
     expect(after.stdout).toContain("Updated");
+  });
+
+  test("keeps mixed paragraph and table order for metadata-free Word OOXML files", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-word-mixed-fallback-"));
+    const filePath = path.join(dir, "mixed.docx");
+    await writeFile(filePath, buildExternalMixedWordZip("Imported intro", "Imported left", "Imported right", "Imported outro"));
+
+    const before = await runCli(["view", filePath, "outline"]);
+    const paragraph = await runCli(["get", filePath, "/body/p[2]", "--json"]);
+    await runCli(["set", filePath, "/body/table[1]/cell[1,2]", "--prop", "text=Updated right"]);
+    const after = await runCli(["view", filePath, "outline"]);
+    const xml = readStoredZip(await readFile(filePath)).get("word/document.xml")!.toString("utf8");
+    const beforeText = before.stdout ?? "";
+
+    expect(before.exitCode).toBe(0);
+    expect(beforeText.indexOf("Paragraph 1: Imported intro")).toBeLessThan(beforeText.indexOf("Table 1: 1x2"));
+    expect(beforeText.indexOf("Table 1: 1x2")).toBeLessThan(beforeText.indexOf("Paragraph 2: Imported outro"));
+    expect(paragraph.stdout).toContain("Imported outro");
+    expect(after.stdout).toContain("R1C2: Updated right");
+    expect(xml.indexOf("Imported intro")).toBeLessThan(xml.indexOf("<w:tbl>"));
+    expect(xml.indexOf("<w:tbl>")).toBeLessThan(xml.indexOf("Imported outro"));
   });
 
   test("reads and mutates a metadata-free standard Excel OOXML file", async () => {
@@ -259,6 +305,44 @@ function buildExternalWordTableZip(left: string, right: string) {
         <w:tc><w:p><w:r><w:t>${right}</w:t></w:r></w:p></w:tc>
       </w:tr>
     </w:tbl>
+    <w:sectPr/>
+  </w:body>
+</w:document>`),
+    },
+  ]);
+}
+
+function buildExternalMixedWordZip(firstParagraph: string, left: string, right: string, secondParagraph: string) {
+  return createStoredZip([
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`),
+    },
+    {
+      name: "_rels/.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "word/document.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>${firstParagraph}</w:t></w:r></w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc><w:p><w:r><w:t>${left}</w:t></w:r></w:p></w:tc>
+        <w:tc><w:p><w:r><w:t>${right}</w:t></w:r></w:p></w:tc>
+      </w:tr>
+    </w:tbl>
+    <w:p><w:r><w:t>${secondParagraph}</w:t></w:r></w:p>
     <w:sectPr/>
   </w:body>
 </w:document>`),
