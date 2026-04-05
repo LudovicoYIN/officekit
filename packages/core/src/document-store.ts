@@ -34,6 +34,7 @@ export interface ExcelCell {
   value: string;
   formula?: string;
   styleId?: string;
+  type?: "string" | "number" | "boolean" | "date";
 }
 
 export interface ExcelWorkbookSettings {
@@ -856,6 +857,12 @@ function renderExcelCellXml(ref: string, cell: ExcelCell) {
     const valueXml = cell.value !== "" ? `<v>${escapeXml(cell.value)}</v>` : "";
     return `<c r="${ref}"${styleAttr}><f>${escapeXml(normalizeFormula(cell.formula))}</f>${valueXml}</c>`;
   }
+  if (cell.type === "boolean") {
+    return `<c r="${ref}"${styleAttr} t="b"><v>${escapeXml(cell.value)}</v></c>`;
+  }
+  if (cell.type === "number" || cell.type === "date") {
+    return `<c r="${ref}"${styleAttr}><v>${escapeXml(cell.value)}</v></c>`;
+  }
   return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t>${escapeXml(cell.value)}</t></is></c>`;
 }
 
@@ -1202,6 +1209,13 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
     cells[ref] = {
       value,
       ...(styleId ? { styleId } : {}),
+      ...(type === "b"
+        ? { type: "boolean" as const }
+        : type === "inlineStr" || type === "s" || type === "str"
+          ? { type: "string" as const }
+          : formula
+            ? {}
+            : { type: "number" as const }),
       ...(formula ? { formula: decodeXml(formula) } : {}),
     };
   }
@@ -1275,11 +1289,12 @@ function decodeXml(value: string) {
 
 function normalizeExcelCell(cell: string | ExcelCell | undefined): ExcelCell {
   if (typeof cell === "string") {
-    return { value: cell };
+    return { value: cell, type: "string" };
   }
   return {
     value: cell?.value ?? "",
     ...(cell?.styleId ? { styleId: cell.styleId } : {}),
+    ...(cell?.type ? { type: cell.type } : {}),
     ...(cell?.formula ? { formula: normalizeFormula(cell.formula) } : {}),
   };
 }
@@ -1288,9 +1303,15 @@ function mergeExcelCell(existing: string | ExcelCell | undefined, props: Record<
   const base = normalizeExcelCell(existing);
   const formula = props.formula === undefined ? base.formula : normalizeFormula(props.formula);
   const styleId = props.styleId ?? props.style ?? base.styleId;
+  const explicitType = props.type?.toLowerCase();
+  const type =
+    explicitType === "number" || explicitType === "boolean" || explicitType === "date" || explicitType === "string"
+      ? (explicitType as ExcelCell["type"])
+      : base.type;
   return {
     value: props.value ?? props.text ?? base.value,
     ...(styleId ? { styleId } : {}),
+    ...(type ? { type } : {}),
     ...(formula ? { formula } : {}),
   };
 }
@@ -1514,10 +1535,49 @@ function inferImportedCell(rawValue: string): ExcelCell {
     return { value: "", formula: normalizeFormula(rawValue) };
   }
   if (/^(true|false)$/i.test(rawValue)) {
-    return { value: rawValue.toUpperCase() === "TRUE" ? "1" : "0" };
+    return { value: rawValue.toUpperCase() === "TRUE" ? "1" : "0", type: "boolean" };
+  }
+  const isoDate = tryParseIsoDate(rawValue);
+  if (isoDate) {
+    return { value: isoDate, type: "date" };
   }
   if (!Number.isNaN(Number(rawValue))) {
-    return { value: rawValue };
+    return { value: rawValue, type: "number" };
   }
-  return { value: rawValue };
+  return { value: rawValue, type: "string" };
+}
+
+function tryParseIsoDate(value: string) {
+  const formats = [
+    /^(\d{4})-(\d{2})-(\d{2})$/,
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/,
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/,
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})$/,
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/,
+    /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/,
+  ];
+
+  for (const format of formats) {
+    const match = format.exec(value);
+    if (!match) continue;
+    const [, year, month, day, hour = "0", minute = "0", second = "0", millis = "0"] = match;
+    const date = new Date(Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+      Number(millis),
+    ));
+    if (Number.isNaN(date.getTime())) continue;
+    return toOADate(date).toString();
+  }
+
+  return null;
+}
+
+function toOADate(date: Date) {
+  const oaEpoch = Date.UTC(1899, 11, 30, 0, 0, 0, 0);
+  return (date.getTime() - oaEpoch) / 86400000;
 }

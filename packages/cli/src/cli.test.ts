@@ -572,6 +572,71 @@ describe("officekit CLI scaffold", () => {
     expect(sheetXml).toContain('r="C4"');
   });
 
+  test("imports quoted CSV fields, embedded newlines, and type inference", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-import-quoted-"));
+    const filePath = path.join(dir, "quoted.xlsx");
+    const csvPath = path.join(dir, "quoted.csv");
+    await writeFile(
+      csvPath,
+      'Name,Active,Formula,Date,Notes\n"Alpha, Inc",TRUE,=SUM(A2:A2),2025-04-05,"Line 1\nLine 2"\n',
+    );
+    await runCli(["create", filePath]);
+
+    await runCli([
+      "import",
+      filePath,
+      "/Sheet1",
+      csvPath,
+      "--format",
+      "csv",
+      "--header",
+      "--start-cell",
+      "A1",
+    ]);
+
+    const nameCell = await runCli(["get", filePath, "/Sheet1/A2", "--json"]);
+    const boolCell = await runCli(["get", filePath, "/Sheet1/B2", "--json"]);
+    const formulaCell = await runCli(["get", filePath, "/Sheet1/C2", "--json"]);
+    const dateCell = await runCli(["get", filePath, "/Sheet1/D2", "--json"]);
+    const noteCell = await runCli(["get", filePath, "/Sheet1/E2", "--json"]);
+    const sheetXml = readStoredZip(await readFile(filePath)).get("xl/worksheets/sheet1.xml")!.toString("utf8");
+
+    expect(nameCell.stdout).toContain('"value": "Alpha, Inc"');
+    expect(boolCell.stdout).toContain('"value": "1"');
+    expect(boolCell.stdout).toContain('"type": "boolean"');
+    expect(formulaCell.stdout).toContain('"formula": "SUM(A2:A2)"');
+    expect(dateCell.stdout).toContain('"type": "date"');
+    expect(noteCell.stdout).toContain('Line 1\\nLine 2');
+    expect(sheetXml).toContain('r="A2" t="inlineStr"');
+    expect(sheetXml).toContain('r="B2" t="b"');
+    expect(sheetXml).toContain('<f>SUM(A2:A2)</f>');
+    expect(sheetXml).toContain('r="D2"><v>');
+  });
+
+  test("imports TSV with the correct delimiter", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-import-tsv-"));
+    const filePath = path.join(dir, "tsv.xlsx");
+    const tsvPath = path.join(dir, "data.tsv");
+    await writeFile(tsvPath, "Name\tScore\nAlice\t98\n");
+    await runCli(["create", filePath]);
+
+    await runCli([
+      "import",
+      filePath,
+      "/Sheet1",
+      tsvPath,
+      "--format",
+      "tsv",
+      "--start-cell",
+      "C3",
+    ]);
+
+    const nameCell = await runCli(["get", filePath, "/Sheet1/C4", "--json"]);
+    const scoreCell = await runCli(["get", filePath, "/Sheet1/D4", "--json"]);
+    expect(nameCell.stdout).toContain('"value": "Alice"');
+    expect(scoreCell.stdout).toContain('"value": "98"');
+  });
+
   test("watch keeps a preview server alive until interrupted", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-watch-"));
     const filePath = path.join(dir, "watch.docx");
