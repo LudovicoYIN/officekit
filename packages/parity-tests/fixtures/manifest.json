@@ -1,0 +1,246 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "worker-1 lane-1 inventory",
+  "generatedAt": "2026-04-05T03:17:00Z",
+  "sourceProject": "../OfficeCLI",
+  "notes": [
+    "mode=copied means the file has been harvested into this repository for parity work.",
+    "mode=referenced means the source artifact is intentionally tracked in the manifest but not vendored here yet (usually because it is large or better treated as an external reference asset)."
+  ],
+  "fixtures": [
+    {
+      "id": "examples-readme",
+      "category": "docs",
+      "sourcePath": "OfficeCLI/examples/README.md",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/README.md",
+      "mode": "copied",
+      "verification": ["inventory", "docs-acceptance"],
+      "rationale": "Top-level examples index capturing learning-path and command patterns."
+    },
+    {
+      "id": "word-readme",
+      "category": "word-docs",
+      "sourcePath": "OfficeCLI/examples/word/README.md",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/README.md",
+      "mode": "copied",
+      "verification": ["inventory", "docs-acceptance"],
+      "rationale": "Word-specific path grammar and property examples."
+    },
+    {
+      "id": "word-formulas-script",
+      "category": "word-script",
+      "sourcePath": "OfficeCLI/examples/word/gen-formulas.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/gen-formulas.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity"],
+      "rationale": "Canonical equation/formula authoring scenario."
+    },
+    {
+      "id": "word-tables-script",
+      "category": "word-script",
+      "sourcePath": "OfficeCLI/examples/word/gen-complex-tables.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/gen-complex-tables.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity"],
+      "rationale": "Complex table generation and styling scenario."
+    },
+    {
+      "id": "word-textbox-script",
+      "category": "word-script",
+      "sourcePath": "OfficeCLI/examples/word/gen-complex-textbox.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/gen-complex-textbox.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity"],
+      "rationale": "Positioned/styled text box workflow for Word parity."
+    },
+    {
+      "id": "word-complex-formulas-output",
+      "category": "word-binary",
+      "sourcePath": "OfficeCLI/examples/word/outputs/complex_formulas.docx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/outputs/complex_formulas.docx",
+      "mode": "copied",
+      "verification": ["differential-parity"],
+      "rationale": "Tiny golden artifact for formula rendering/regression checks."
+    },
+    {
+      "id": "word-complex-tables-output",
+      "category": "word-binary",
+      "sourcePath": "OfficeCLI/examples/word/outputs/complex_tables.docx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/word/outputs/complex_tables.docx",
+      "mode": "copied",
+      "verification": ["differential-parity"],
+      "rationale": "Tiny golden artifact for table layout/style comparisons."
+    },
+    {
+      "id": "excel-readme",
+      "category": "excel-docs",
+      "sourcePath": "OfficeCLI/examples/excel/README.md",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/README.md",
+      "mode": "copied",
+      "verification": ["inventory", "docs-acceptance"],
+      "rationale": "Excel path grammar and chart/property examples."
+    },
+    {
+      "id": "excel-beautiful-charts-script",
+      "category": "excel-script",
+      "sourcePath": "OfficeCLI/examples/excel/gen-beautiful-charts.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/gen-beautiful-charts.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity"],
+      "rationale": "Professional chart styling scenario."
+    },
+    {
+      "id": "excel-charts-demo-script",
+      "category": "excel-script",
+      "sourcePath": "OfficeCLI/examples/excel/gen-charts-demo.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/gen-charts-demo.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity"],
+      "rationale": "Broad chart-type coverage scenario (14+ variants)."
+    },
+    {
+      "id": "excel-sales-report-output",
+      "category": "excel-binary",
+      "sourcePath": "OfficeCLI/examples/excel/outputs/sales_report.xlsx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/outputs/sales_report.xlsx",
+      "mode": "copied",
+      "verification": ["differential-parity"],
+      "rationale": "Small stable workbook for regression checks."
+    },
+    {
+      "id": "excel-charts-demo-output",
+      "category": "excel-binary",
+      "sourcePath": "OfficeCLI/examples/excel/outputs/charts_demo.xlsx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/outputs/charts_demo.xlsx",
+      "mode": "copied",
+      "verification": ["differential-parity"],
+      "rationale": "Golden workbook for multi-chart comparisons."
+    },
+    {
+      "id": "excel-beautiful-charts-output",
+      "category": "excel-binary",
+      "sourcePath": "OfficeCLI/examples/excel/outputs/beautiful_charts.xlsx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/excel/outputs/beautiful_charts.xlsx",
+      "mode": "copied",
+      "verification": ["differential-parity"],
+      "rationale": "Styled chart workbook for visual and structure diffing."
+    },
+    {
+      "id": "ppt-readme",
+      "category": "ppt-docs",
+      "sourcePath": "OfficeCLI/examples/ppt/README.md",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/README.md",
+      "mode": "copied",
+      "verification": ["inventory", "docs-acceptance"],
+      "rationale": "PowerPoint examples and template catalogue overview."
+    },
+    {
+      "id": "ppt-templates-readme",
+      "category": "ppt-docs",
+      "sourcePath": "OfficeCLI/examples/ppt/templates/README.md",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/templates/README.md",
+      "mode": "copied",
+      "verification": ["inventory", "docs-acceptance"],
+      "rationale": "Professional template lineage and style taxonomy."
+    },
+    {
+      "id": "ppt-beautiful-script",
+      "category": "ppt-script",
+      "sourcePath": "OfficeCLI/examples/ppt/gen-beautiful-pptx.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/gen-beautiful-pptx.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity", "preview"],
+      "rationale": "Morph-heavy presentation creation flow."
+    },
+    {
+      "id": "ppt-animations-script",
+      "category": "ppt-script",
+      "sourcePath": "OfficeCLI/examples/ppt/gen-animations-pptx.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/gen-animations-pptx.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity", "preview"],
+      "rationale": "Animation-focused regression scenario."
+    },
+    {
+      "id": "ppt-video-script",
+      "category": "ppt-script",
+      "sourcePath": "OfficeCLI/examples/ppt/gen-video-pptx.py",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/gen-video-pptx.py",
+      "mode": "copied",
+      "verification": ["integration", "parity", "preview"],
+      "rationale": "Video/media embedding scenario."
+    },
+    {
+      "id": "ppt-3d-script",
+      "category": "ppt-script",
+      "sourcePath": "OfficeCLI/examples/ppt/gen-3d-sun-pptx.sh",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/gen-3d-sun-pptx.sh",
+      "mode": "copied",
+      "verification": ["integration", "parity", "preview"],
+      "rationale": "3D model/GLB presentation scenario."
+    },
+    {
+      "id": "ppt-3d-model-asset",
+      "category": "ppt-asset",
+      "sourcePath": "OfficeCLI/examples/ppt/models/sun.glb",
+      "harvestPath": null,
+      "mode": "referenced",
+      "verification": ["integration", "preview"],
+      "rationale": "Large reference asset kept in source repo for now; needed to reproduce the 3D-model scenario."
+    },
+    {
+      "id": "ppt-beautiful-output",
+      "category": "ppt-binary",
+      "sourcePath": "OfficeCLI/examples/ppt/outputs/beautiful_presentation.pptx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/outputs/beautiful_presentation.pptx",
+      "mode": "copied",
+      "verification": ["differential-parity", "preview"],
+      "rationale": "Small stable deck for morph/layout regression checks."
+    },
+    {
+      "id": "ppt-data-output",
+      "category": "ppt-binary",
+      "sourcePath": "OfficeCLI/examples/ppt/outputs/data_presentation.pptx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/outputs/data_presentation.pptx",
+      "mode": "copied",
+      "verification": ["differential-parity", "preview"],
+      "rationale": "Presentation layout and data visualization deck."
+    },
+    {
+      "id": "ppt-animations-output",
+      "category": "ppt-binary",
+      "sourcePath": "OfficeCLI/examples/ppt/outputs/gen-animations-pptx.pptx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/outputs/gen-animations-pptx.pptx",
+      "mode": "copied",
+      "verification": ["differential-parity", "preview"],
+      "rationale": "Animation/effects parity deck."
+    },
+    {
+      "id": "ppt-video-output",
+      "category": "ppt-binary",
+      "sourcePath": "OfficeCLI/examples/ppt/outputs/gen-video-pptx.pptx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/ppt/outputs/gen-video-pptx.pptx",
+      "mode": "copied",
+      "verification": ["differential-parity", "preview"],
+      "rationale": "Video/media embedding golden deck."
+    },
+    {
+      "id": "top-level-morph-sample",
+      "category": "ppt-binary",
+      "sourcePath": "OfficeCLI/examples/product_launch_morph.pptx",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/examples/product_launch_morph.pptx",
+      "mode": "copied",
+      "verification": ["differential-parity", "preview"],
+      "rationale": "Top-level morph showcase referenced by README lineage."
+    },
+    {
+      "id": "ci-build-workflow",
+      "category": "workflow",
+      "sourcePath": "OfficeCLI/.github/workflows/build.yml",
+      "harvestPath": "packages/parity-tests/fixtures/source-officecli/.github/workflows/build.yml",
+      "mode": "copied",
+      "verification": ["inventory", "e2e"],
+      "rationale": "Canonical release matrix plus create/add/get smoke commands to port into officekit CI."
+    }
+  ]
+}
