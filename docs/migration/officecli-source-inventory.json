@@ -1,0 +1,325 @@
+{
+  "generated_from": "lane-1 manual inventory against OfficeCLI sources",
+  "command_builders": [
+    "OfficeCLI/src/officecli/CommandBuilder.Add.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Batch.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Check.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.GetQuery.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Import.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Raw.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Set.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.View.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.Watch.cs",
+    "OfficeCLI/src/officecli/CommandBuilder.cs"
+  ],
+  "commands": [
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Add.cs",
+      "command": "add"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Add.cs",
+      "command": "remove"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Add.cs",
+      "command": "move"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Add.cs",
+      "command": "swap"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Batch.cs",
+      "command": "batch"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Check.cs",
+      "command": "validate"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Check.cs",
+      "command": "check"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.GetQuery.cs",
+      "command": "get"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.GetQuery.cs",
+      "command": "query"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Import.cs",
+      "command": "import"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Import.cs",
+      "command": "create"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Import.cs",
+      "command": "merge"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Raw.cs",
+      "command": "raw"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Raw.cs",
+      "command": "raw-set"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Raw.cs",
+      "command": "add-part"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Set.cs",
+      "command": "set"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.View.cs",
+      "command": "view"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Watch.cs",
+      "command": "watch"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.Watch.cs",
+      "command": "unwatch"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.cs",
+      "command": "open"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.cs",
+      "command": "close"
+    },
+    {
+      "file": "OfficeCLI/src/officecli/CommandBuilder.cs",
+      "command": "__resident-serve__"
+    }
+  ],
+  "handlers": {
+    "word": [
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.Media.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.Misc.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.Structure.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.Table.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.Text.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Add.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.FormFields.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Helpers.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.Charts.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.Css.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.Shapes.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.Tables.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.Text.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.ImageHelpers.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Mutations.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Navigation.DocSettings.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Navigation.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Query.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Selector.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Set.Compatibility.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Set.DocDefaults.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Set.DocSettings.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Set.SectionLayout.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.Set.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.StyleList.cs",
+      "OfficeCLI/src/officecli/Handlers/Word/WordHandler.View.cs"
+    ],
+    "excel": [
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Add.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Helpers.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.HtmlPreview.Charts.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.HtmlPreview.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Import.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Query.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Remove.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Selector.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Set.Workbook.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Set.cs",
+      "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.View.cs"
+    ],
+    "ppt": [
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Media.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Misc.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Model3D.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Shape.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Slide.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Table.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.Text.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Align.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Animations.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Background.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Chart.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Effects.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Fill.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Helpers.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.Charts.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.Css.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.Shapes.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.Tables.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.Text.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Hyperlinks.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Mutations.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.NodeBuilder.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Notes.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Query.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Selector.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Set.Presentation.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Set.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.ShapeProperties.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.SvgPreview.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Theme.cs",
+      "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.View.cs"
+    ],
+    "top_level": [
+      "OfficeCLI/src/officecli/Handlers/ExcelHandler.cs",
+      "OfficeCLI/src/officecli/Handlers/PowerPointHandler.cs",
+      "OfficeCLI/src/officecli/Handlers/WordHandler.cs"
+    ]
+  },
+  "core_files": [
+    "OfficeCLI/src/officecli/Core/AttributeFilter.cs",
+    "OfficeCLI/src/officecli/Core/BatchTypes.cs",
+    "OfficeCLI/src/officecli/Core/ChartAdvancedFeatures.cs",
+    "OfficeCLI/src/officecli/Core/ChartBuilder.cs",
+    "OfficeCLI/src/officecli/Core/ChartExBuilder.cs",
+    "OfficeCLI/src/officecli/Core/ChartHelper.cs",
+    "OfficeCLI/src/officecli/Core/ChartPresets.cs",
+    "OfficeCLI/src/officecli/Core/ChartReader.cs",
+    "OfficeCLI/src/officecli/Core/ChartSetter.cs",
+    "OfficeCLI/src/officecli/Core/ChartSetterHelpers.cs",
+    "OfficeCLI/src/officecli/Core/ChartSvgRenderer.cs",
+    "OfficeCLI/src/officecli/Core/CliException.cs",
+    "OfficeCLI/src/officecli/Core/CliLogger.cs",
+    "OfficeCLI/src/officecli/Core/ColorMath.cs",
+    "OfficeCLI/src/officecli/Core/DocumentHandlerFactory.cs",
+    "OfficeCLI/src/officecli/Core/DocumentIssue.cs",
+    "OfficeCLI/src/officecli/Core/DocumentNode.cs",
+    "OfficeCLI/src/officecli/Core/DrawingEffectsHelper.cs",
+    "OfficeCLI/src/officecli/Core/EmuConverter.cs",
+    "OfficeCLI/src/officecli/Core/ExcelStyleManager.cs",
+    "OfficeCLI/src/officecli/Core/ExtendedPropertiesHandler.cs",
+    "OfficeCLI/src/officecli/Core/FontMetricsReader.cs",
+    "OfficeCLI/src/officecli/Core/FormulaEvaluator.Functions.cs",
+    "OfficeCLI/src/officecli/Core/FormulaEvaluator.Helpers.cs",
+    "OfficeCLI/src/officecli/Core/FormulaEvaluator.cs",
+    "OfficeCLI/src/officecli/Core/FormulaParser.cs",
+    "OfficeCLI/src/officecli/Core/GenericXmlQuery.cs",
+    "OfficeCLI/src/officecli/Core/HtmlPreviewHelper.cs",
+    "OfficeCLI/src/officecli/Core/IDocumentHandler.cs",
+    "OfficeCLI/src/officecli/Core/ImageSource.cs",
+    "OfficeCLI/src/officecli/Core/Installer.cs",
+    "OfficeCLI/src/officecli/Core/McpInstaller.cs",
+    "OfficeCLI/src/officecli/Core/McpServer.cs",
+    "OfficeCLI/src/officecli/Core/OutputFormatter.cs",
+    "OfficeCLI/src/officecli/Core/ParseHelpers.cs",
+    "OfficeCLI/src/officecli/Core/PathAliases.cs",
+    "OfficeCLI/src/officecli/Core/PivotTableHelper.cs",
+    "OfficeCLI/src/officecli/Core/RawXmlHelper.cs",
+    "OfficeCLI/src/officecli/Core/ResidentClient.cs",
+    "OfficeCLI/src/officecli/Core/ResidentServer.cs",
+    "OfficeCLI/src/officecli/Core/SkillInstaller.cs",
+    "OfficeCLI/src/officecli/Core/SpacingConverter.cs",
+    "OfficeCLI/src/officecli/Core/TemplateMerger.cs",
+    "OfficeCLI/src/officecli/Core/ThemeColorResolver.cs",
+    "OfficeCLI/src/officecli/Core/ThemeHandler.cs",
+    "OfficeCLI/src/officecli/Core/Units.cs",
+    "OfficeCLI/src/officecli/Core/UpdateChecker.cs",
+    "OfficeCLI/src/officecli/Core/WatchNotifier.cs",
+    "OfficeCLI/src/officecli/Core/WatchServer.cs"
+  ],
+  "readmes": [
+    "OfficeCLI/README.md",
+    "OfficeCLI/examples/README.md",
+    "OfficeCLI/examples/word/README.md",
+    "OfficeCLI/examples/excel/README.md",
+    "OfficeCLI/examples/ppt/README.md"
+  ],
+  "examples": [
+    "OfficeCLI/examples/Alien_Guide.pptx",
+    "OfficeCLI/examples/Cat-Secret-Life.pptx",
+    "OfficeCLI/examples/README.md",
+    "OfficeCLI/examples/budget_review_v2.pptx",
+    "OfficeCLI/examples/excel/README.md",
+    "OfficeCLI/examples/excel/gen-beautiful-charts.sh",
+    "OfficeCLI/examples/excel/gen-charts-demo.sh",
+    "OfficeCLI/examples/excel/outputs/beautiful_charts.xlsx",
+    "OfficeCLI/examples/excel/outputs/charts_demo.xlsx",
+    "OfficeCLI/examples/excel/outputs/sales_report.xlsx",
+    "OfficeCLI/examples/ppt/README.md",
+    "OfficeCLI/examples/ppt/gen-3d-sun-pptx.sh",
+    "OfficeCLI/examples/ppt/gen-animations-pptx.sh",
+    "OfficeCLI/examples/ppt/gen-beautiful-pptx.sh",
+    "OfficeCLI/examples/ppt/gen-video-pptx.py",
+    "OfficeCLI/examples/ppt/models/sun.glb",
+    "OfficeCLI/examples/ppt/outputs/3d-sun.pptx",
+    "OfficeCLI/examples/ppt/outputs/beautiful_presentation.pptx",
+    "OfficeCLI/examples/ppt/outputs/claude-morph-template-v39.pptx",
+    "OfficeCLI/examples/ppt/outputs/claude-morph-template-v40.pptx",
+    "OfficeCLI/examples/ppt/outputs/creative-marketing.pptx",
+    "OfficeCLI/examples/ppt/outputs/data_presentation.pptx",
+    "OfficeCLI/examples/ppt/outputs/gen-animations-pptx.pptx",
+    "OfficeCLI/examples/ppt/outputs/gen-video-pptx.pptx",
+    "OfficeCLI/examples/ppt/templates/README.md",
+    "OfficeCLI/examples/ppt/templates/styles/brand--aura-coffee/aura_coffee.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/brand--aura-coffee/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/brand--aura-coffee-dark/AURA_COFFEE.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/brand--aura-coffee-dark/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/future--2050-vision/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/future--2050-vision/\u672a\u6765\u5df2\u6765_2050.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--cat-philosophy/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--cat-philosophy/cat_philosophy.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--cat-secret-life/Cat-Secret-Life.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--cat-secret-life/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--feline-report/Feline_Report.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/lifestyle--feline-report/build_ppt.sh",
+    "OfficeCLI/examples/ppt/templates/styles/product--aionui-promo/AionUI-\u63a8\u5e7f.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/product--aionui-promo/outline.md",
+    "OfficeCLI/examples/ppt/templates/styles/product--geminicli-timetravel/GeminiCLI-TimeTravel.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/product--geminicli-timetravel/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/productivity--attention-budget/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/productivity--attention-budget/\u6ce8\u610f\u529b\u9884\u7b97-\u628a\u624b\u673a\u65f6\u95f4\u53d8\u6210\u521b\u9020\u65f6\u95f4.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/science--alien-guide/Alien_Guide.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/science--alien-guide/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/science--mars-settlement/Mars-Settlement-Guide.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/science--mars-settlement/build.json",
+    "OfficeCLI/examples/ppt/templates/styles/science--space-exploration/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/science--space-exploration/\u592a\u7a7a\u63a2\u7d22\u5386\u7a0b.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/science--time-travel/Time_Travel.pptx",
+    "OfficeCLI/examples/ppt/templates/styles/science--time-travel/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/tech--wildlife-company/build.sh",
+    "OfficeCLI/examples/ppt/templates/styles/tech--wildlife-company/\u91ce\u751f\u52a8\u7269\u79d1\u6280\u516c\u53f8.pptx",
+    "OfficeCLI/examples/product_launch_morph.pptx",
+    "OfficeCLI/examples/word/README.md",
+    "OfficeCLI/examples/word/gen-complex-tables.sh",
+    "OfficeCLI/examples/word/gen-complex-textbox.sh",
+    "OfficeCLI/examples/word/gen-formulas.sh",
+    "OfficeCLI/examples/word/outputs/complex_formulas.docx",
+    "OfficeCLI/examples/word/outputs/complex_tables.docx"
+  ],
+  "ci_smoke_excerpt": [
+    "        if: >-",
+    "          (matrix.rid == 'osx-arm64' && runner.arch == 'ARM64') ||",
+    "          (matrix.rid == 'osx-x64' && runner.arch == 'X64') ||",
+    "          (matrix.rid == 'linux-x64' && runner.os == 'Linux')",
+    "        run: |",
+    "          chmod +x publish/${{ matrix.name }}",
+    "          publish/${{ matrix.name }} create test_smoke.docx",
+    "          publish/${{ matrix.name }} add test_smoke.docx /body --type paragraph --prop text=\"Hello from CI\"",
+    "          publish/${{ matrix.name }} get test_smoke.docx /body/p[1]",
+    "          rm -f test_smoke.docx",
+    ""
+  ],
+  "explicit_exclusions": [
+    "MCP server / MCP installer for officekit v1"
+  ]
+}
