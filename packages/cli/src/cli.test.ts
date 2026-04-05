@@ -388,6 +388,38 @@ describe("officekit CLI scaffold", () => {
     expect(sheetXml).toContain("<v>303</v>");
   });
 
+  test("mutates a real harvested OfficeCLI formula workbook without dropping formulas", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-real-formula-fixture-"));
+    const fixturePath = path.resolve(
+      import.meta.dir,
+      "../../../fixtures/officecli-source/examples/excel/outputs/sales_report.xlsx",
+    );
+    const filePath = path.join(dir, "sales_report.xlsx");
+    await writeFile(filePath, await readFile(fixturePath));
+
+    const before = await runCli(["get", filePath, "/Sheet1/F3", "--json"]);
+    await runCli([
+      "set",
+      filePath,
+      "/Sheet1/F3",
+      "--prop",
+      "formula==SUM(B3:E3)",
+      "--prop",
+      "value=412",
+    ]);
+    const after = await runCli(["get", filePath, "/Sheet1/F3", "--json"]);
+    const zip = readStoredZip(await readFile(filePath));
+    const sheetXml = zip.get("xl/worksheets/sheet1.xml")!.toString("utf8");
+
+    expect(before.stdout).toContain('"formula": "SUM(B3:E3)"');
+    expect(before.stdout).toContain('"value": ""');
+    expect(after.stdout).toContain('"formula": "SUM(B3:E3)"');
+    expect(after.stdout).toContain('"value": "412"');
+    expect(sheetXml).toContain('r="F3"');
+    expect(sheetXml).toContain("<f>SUM(B3:E3)</f>");
+    expect(sheetXml).toContain("<v>412</v>");
+  });
+
   test("reads and mutates a metadata-free standard PowerPoint OOXML file", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-ppt-fallback-"));
     const filePath = path.join(dir, "fallback.pptx");
