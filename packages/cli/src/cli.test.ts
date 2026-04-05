@@ -720,6 +720,67 @@ describe("officekit CLI scaffold", () => {
     expect(sheetXml).toContain('r="D2"><v>42</v>');
   });
 
+  test("round-trips an imported workbook without dropping header affordances or inferred cell semantics", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-import-roundtrip-"));
+    const filePath = path.join(dir, "roundtrip.xlsx");
+    const csvPath = path.join(dir, "roundtrip.csv");
+    await writeFile(
+      csvPath,
+      'Name,Enabled,Formula,Date,Amount\nAlpha,TRUE,=SUM(E2:E2),2025-04-05,42\n',
+    );
+    await runCli(["create", filePath]);
+    await runCli([
+      "import",
+      filePath,
+      "/Sheet1",
+      csvPath,
+      "--format",
+      "csv",
+      "--header",
+      "--start-cell",
+      "A1",
+    ]);
+
+    const importedWorkbook = await runCli(["get", filePath, "/workbook", "--json"]);
+    expect(importedWorkbook.stdout).toContain('"autoFilter": "A1:E2"');
+    expect(importedWorkbook.stdout).toContain('"freezeTopLeftCell": "A2"');
+
+    await runCli([
+      "set",
+      filePath,
+      "/workbook",
+      "--prop",
+      "calc.mode=autoNoTable",
+      "--prop",
+      "workbook.lockStructure=true",
+    ]);
+    await runCli(["set", filePath, "/Sheet1/E2", "--prop", "value=84"]);
+
+    const boolCell = await runCli(["get", filePath, "/Sheet1/B2", "--json"]);
+    const formulaCell = await runCli(["get", filePath, "/Sheet1/C2", "--json"]);
+    const dateCell = await runCli(["get", filePath, "/Sheet1/D2", "--json"]);
+    const amountCell = await runCli(["get", filePath, "/Sheet1/E2", "--json"]);
+    const workbook = await runCli(["get", filePath, "/workbook", "--json"]);
+    const sheetXml = readStoredZip(await readFile(filePath)).get("xl/worksheets/sheet1.xml")!.toString("utf8");
+    const workbookXml = readStoredZip(await readFile(filePath)).get("xl/workbook.xml")!.toString("utf8");
+
+    expect(boolCell.stdout).toContain('"type": "boolean"');
+    expect(boolCell.stdout).toContain('"value": "1"');
+    expect(formulaCell.stdout).toContain('"formula": "SUM(E2:E2)"');
+    expect(dateCell.stdout).toContain('"type": "date"');
+    expect(amountCell.stdout).toContain('"type": "number"');
+    expect(amountCell.stdout).toContain('"value": "84"');
+    expect(workbook.stdout).toContain('"autoFilter": "A1:E2"');
+    expect(workbook.stdout).toContain('"freezeTopLeftCell": "A2"');
+    expect(workbook.stdout).toContain('"calcMode": "autoNoTable"');
+    expect(workbook.stdout).toContain('"lockStructure": true');
+    expect(sheetXml).toContain('autoFilter ref="A1:E2"');
+    expect(sheetXml).toContain('topLeftCell="A2"');
+    expect(sheetXml).toContain('r="C2"><f>SUM(E2:E2)</f>');
+    expect(workbookXml).toContain('calcMode="autoNoTable"');
+    expect(workbookXml).toContain('lockStructure="1"');
+  });
+
   test("watch keeps a preview server alive until interrupted", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-watch-"));
     const filePath = path.join(dir, "watch.docx");
