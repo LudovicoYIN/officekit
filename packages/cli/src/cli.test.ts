@@ -653,6 +653,73 @@ describe("officekit CLI scaffold", () => {
     expect(scoreCell.stdout).toContain('"value": "98"');
   });
 
+  test("imports CSV with escaped quotes via stdin", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-import-stdin-"));
+    const filePath = path.join(dir, "stdin.xlsx");
+    await runCli(["create", filePath]);
+
+    const child = spawn(process.execPath, [
+      "run",
+      "packages/cli/bin/officekit",
+      "import",
+      filePath,
+      "/Sheet1",
+      "--stdin",
+      "--format",
+      "csv",
+      "--start-cell",
+      "A1",
+    ], {
+      cwd: path.resolve(import.meta.dir, "../../.."),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdin.write('Name,Quote\n"Alpha ""Prime""","He said ""hi"""\n');
+    child.stdin.end();
+
+    const stdout = await waitForOutput(child.stdout, /"importedRows":\s*2/);
+    const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('"importedCols": 2');
+
+    const nameCell = await runCli(["get", filePath, "/Sheet1/A2", "--json"]);
+    const quoteCell = await runCli(["get", filePath, "/Sheet1/B2", "--json"]);
+    expect(nameCell.stdout).toContain('Alpha \\"Prime\\"');
+    expect(quoteCell.stdout).toContain('He said \\"hi\\"');
+  });
+
+  test("imports TSV with formulas, booleans, dates, and numbers via extension inference", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-import-tsv-types-"));
+    const filePath = path.join(dir, "types.xlsx");
+    const tsvPath = path.join(dir, "typed.tsv");
+    await writeFile(tsvPath, "Flag\tFormula\tDate\tValue\nTRUE\t=SUM(A2:A2)\t2025-04-05\t42\n");
+    await runCli(["create", filePath]);
+
+    await runCli([
+      "import",
+      filePath,
+      "/Sheet1",
+      tsvPath,
+      "--header",
+      "--start-cell",
+      "A1",
+    ]);
+
+    const boolCell = await runCli(["get", filePath, "/Sheet1/A2", "--json"]);
+    const formulaCell = await runCli(["get", filePath, "/Sheet1/B2", "--json"]);
+    const dateCell = await runCli(["get", filePath, "/Sheet1/C2", "--json"]);
+    const numberCell = await runCli(["get", filePath, "/Sheet1/D2", "--json"]);
+    const sheetXml = readStoredZip(await readFile(filePath)).get("xl/worksheets/sheet1.xml")!.toString("utf8");
+
+    expect(boolCell.stdout).toContain('"type": "boolean"');
+    expect(formulaCell.stdout).toContain('"formula": "SUM(A2:A2)"');
+    expect(dateCell.stdout).toContain('"type": "date"');
+    expect(numberCell.stdout).toContain('"type": "number"');
+    expect(sheetXml).toContain('r="A2" t="b"');
+    expect(sheetXml).toContain('<f>SUM(A2:A2)</f>');
+    expect(sheetXml).toContain('r="D2"><v>42</v>');
+  });
+
   test("watch keeps a preview server alive until interrupted", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-watch-"));
     const filePath = path.join(dir, "watch.docx");

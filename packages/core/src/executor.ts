@@ -88,6 +88,7 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
     }
 
     let sourceFile: string | undefined;
+    let useStdin = false;
     let delimiter = ",";
     let hasHeader = false;
     let startCell = "A1";
@@ -105,6 +106,10 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
         index += 1;
         continue;
       }
+      if (token === "--stdin") {
+        useStdin = true;
+        continue;
+      }
       if (token === "--header") {
         hasHeader = true;
         continue;
@@ -119,12 +124,27 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
       }
     }
 
-    if (!sourceFile) {
-      throw new UsageError("import currently requires a source CSV/TSV file.", "Use: officekit import book.xlsx /Sheet1 data.csv --format csv");
-    }
-
     const fs = await import("node:fs/promises");
-    const content = await fs.readFile(sourceFile, "utf8");
+    let content: string;
+    if (useStdin) {
+      content = await new Promise<string>((resolve, reject) => {
+        let buffer = "";
+        process.stdin.setEncoding("utf8");
+        process.stdin.on("data", (chunk) => {
+          buffer += chunk;
+        });
+        process.stdin.once("end", () => resolve(buffer));
+        process.stdin.once("error", reject);
+      });
+    } else {
+      if (!sourceFile) {
+        throw new UsageError("import currently requires a source CSV/TSV file or --stdin.", "Use: officekit import book.xlsx /Sheet1 data.csv --format csv");
+      }
+      if (delimiter === "," && (sourceFile.endsWith(".tsv") || sourceFile.endsWith(".tab"))) {
+        delimiter = "\t";
+      }
+      content = await fs.readFile(sourceFile, "utf8");
+    }
     const result = await importDelimitedData(filePath, parentPath, content, {
       delimiter,
       hasHeader,
