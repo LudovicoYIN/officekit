@@ -3460,6 +3460,11 @@ function evaluateFormulaExpression(
     PMT: (args) => evaluatePmtFormula(state, args, sheet, visited),
     FV: (args) => evaluateFvFormula(state, args, sheet, visited),
     PV: (args) => evaluatePvFormula(state, args, sheet, visited),
+    NPER: (args) => evaluateNperFormula(state, args, sheet, visited),
+    STDEV: (args) => evaluateStdevVarFormula(state, args, sheet, visited, true),
+    STDEVP: (args) => evaluateStdevVarFormula(state, args, sheet, visited, false),
+    VAR: (args) => evaluateVarFormula(state, args, sheet, visited, true),
+    VARP: (args) => evaluateVarFormula(state, args, sheet, visited, false),
     AND: (args) => evaluateAndFormula(state, args, sheet, visited),
     OR: (args) => evaluateOrFormula(state, args, sheet, visited),
     NOT: (args) => evaluateNotFormula(state, args, sheet, visited),
@@ -3481,7 +3486,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|STDEV|STDEVP|VAR|VARP|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -4077,6 +4082,33 @@ function evaluateIfsFormula(state: ExcelWorkbookState | undefined, args: string,
     }
   }
   return undefined;
+}
+
+function evaluateNperFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const rate = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+  const pmt = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0;
+  const pv = firstNumericFormulaArg(state, parts[2] ?? "0", sheet, visited) ?? 0;
+  const fv = parts[3] !== undefined ? (firstNumericFormulaArg(state, parts[3], sheet, visited) ?? 0) : 0;
+  if (rate === 0) return pmt !== 0 ? -(pv + fv) / pmt : undefined;
+  const inner = (-fv * rate + pmt) / (pv * rate + pmt);
+  return inner <= 0 ? undefined : Math.log(inner) / Math.log(1 + rate);
+}
+
+function evaluateStdevVarFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>, isSample: boolean) {
+  const values = extractFormulaArgValues(state, args, sheet, visited);
+  if (values.length < (isSample ? 2 : 1)) return undefined;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const sumSq = values.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
+  return Math.sqrt(sumSq / (isSample ? values.length - 1 : values.length));
+}
+
+function evaluateVarFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>, isSample: boolean) {
+  const values = extractFormulaArgValues(state, args, sheet, visited);
+  if (values.length < (isSample ? 2 : 1)) return undefined;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  const sumSq = values.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
+  return sumSq / (isSample ? values.length - 1 : values.length);
 }
 
 function evaluateChooseFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
