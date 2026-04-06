@@ -13,6 +13,10 @@ export * from "./types.js";
 // Result envelope helpers
 export * from "./result.js";
 
+// Document handle and registry (resident/in-memory mode)
+export * from "./document-handle.js";
+export * from "./registry.js";
+
 // Path parsing and resolution
 export * from "./path.js";
 
@@ -37,8 +41,45 @@ export * from "./shapes.js";
 // Table mutations
 export * from "./tables.js";
 
+// Text content operations
+export * from "./text.js";
+
+// Template merge operations (merge with {{key}} placeholders)
+export * from "./merge.js";
+
+// Background and fill effects
+export * from "./background.js";
+
 // Query and get operations
 export * from "./query.js";
 
 // View operations (ViewAsText, ViewAsAnnotated, ViewAsOutline, ViewAsStats, ViewAsIssues)
 export * from "./views.js";
+
+// Media operations (getMedia, addPicture, removeMedia, replacePicture, getMediaData)
+export * from "./media.js";
+
+// Hyperlink operations (getHyperlink, setHyperlink, removeHyperlink, setExternalHyperlink, setInternalHyperlink)
+export * from "./hyperlinks.js";
+
+// Chart operations (getChart, addChart, setChartData, setChartType)
+export * from "./charts.js";
+
+// Theme operations (getTheme, getThemeColor, setThemeColor, getThemeFont, applyTheme)
+export * from "./theme.js";
+
+// Preview operations (viewAsHtml, viewAsSvg, generatePreview)
+export * from "./preview-html.js";
+export * from "./preview-svg.js";
+
+// Overflow checking operations (checkShapeTextOverflow, checkSlideOverflow, getOverflowIssues)
+export * from "./overflow.js";
+
+// Animation operations (getAnimations, setAnimation, removeAnimation)
+export * from "./animations.js";
+
+// Watch operations (watch - live preview with auto-refresh)
+export * from "./watch.js";
+
+// 3D Model operations (get3DModels, add3DModel, remove3DModel, set3DModelRotation)
+export * from "./models-3d.js";
