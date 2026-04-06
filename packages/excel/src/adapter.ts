@@ -3282,6 +3282,24 @@ function evaluateFormulaForDisplay(state: ExcelWorkbookState | undefined, sheet:
     if (textJoin !== undefined) {
       return textJoin;
     }
+    const ifErrorMatch = /^IFERROR\((.+)\)$/i.exec(normalized.trim());
+    if (ifErrorMatch) {
+      const args = splitFormulaArgs(ifErrorMatch[1]);
+      if (args.length >= 2) {
+        const valueResult = evaluateInlineFormulaArg(state, args[0].trim(), sheet, new Set());
+        const asNum = Number(valueResult);
+        const isError = valueResult === undefined || Number.isNaN(asNum);
+        if (!isError) {
+          return Number.isInteger(asNum) ? String(asNum) : String(Number(asNum.toFixed(10)));
+        }
+        const errorResult = evaluateInlineFormulaArg(state, args[1].trim(), sheet, new Set());
+        if (errorResult !== undefined) {
+          const asNum2 = Number(errorResult);
+          return Number.isInteger(asNum2) ? String(asNum2) : String(Number(asNum2.toFixed(10)));
+        }
+        return errorResult ?? "";
+      }
+    }
   }
   const visited = new Set<string>();
   const numeric = evaluateFormulaExpression(state, sheet, ref, visited);
