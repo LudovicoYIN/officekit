@@ -370,6 +370,30 @@ export async function setExcelNode(filePath: string, targetPath: string, options
     return next;
   }
 
+  const sparklineMatch = /^\/([^/]+)\/sparkline\[(\d+)\]$/i.exec(targetPath);
+  if (sparklineMatch) {
+    const sheet = ensureSheetState(state, sparklineMatch[1]);
+    const next = setSparkline(sheet, Number(sparklineMatch[2]), options.props);
+    await writeWorkbookState(filePath, state);
+    return next;
+  }
+
+  const chartMatch = /^\/([^/]+)\/chart\[(\d+)\](?:\/series\[(\d+)\])?$/i.exec(targetPath);
+  if (chartMatch) {
+    const sheet = ensureSheetState(state, chartMatch[1]);
+    const next = setChart(state, sheet, Number(chartMatch[2]), chartMatch[3] ? Number(chartMatch[3]) : undefined, options.props);
+    await writeWorkbookState(filePath, state);
+    return next;
+  }
+
+  const pivotMatch = /^\/([^/]+)\/pivottable\[(\d+)\]$/i.exec(targetPath);
+  if (pivotMatch) {
+    const sheet = ensureSheetState(state, pivotMatch[1]);
+    const next = setPivotTable(state, sheet, Number(pivotMatch[2]), options.props);
+    await writeWorkbookState(filePath, state);
+    return next;
+  }
+
   const { sheet, range } = resolveExcelTarget(state, targetPath);
   if (!range) {
     throw new UsageError("Excel set requires a cell, range, or supported object path.");
@@ -450,6 +474,16 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
+  if (normalized === "formula" || normalized === "formulas") {
+    for (const sheet of state.sheets) {
+      for (const ref of Object.keys(sheet.cells).sort()) {
+      if (sheet.cells[ref]?.formula) {
+          nodes.push(materializeCellNode(sheet, ref));
+        }
+      }
+    }
+    return nodes;
+  }
   if (normalized === "validation" || normalized === "validations") {
     for (const sheet of state.sheets) {
       parseValidations(sheet.xml).forEach((validation, index) => {
@@ -490,7 +524,15 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
-  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, validation, comment, table, chart, pivottable.");
+  if (normalized === "sparkline" || normalized === "sparklines") {
+    for (const sheet of state.sheets) {
+      parseSparklines(sheet.xml).forEach((sparkline, index) => {
+        nodes.push({ ...sparkline, path: `/${sheet.name}/sparkline[${index + 1}]`, type: "sparkline" });
+      });
+    }
+    return nodes;
+  }
+  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, formula, validation, comment, table, chart, pivottable, sparkline.");
 }
 
 export async function viewExcelDocument(filePath: string, mode: string) {
@@ -691,6 +733,18 @@ async function writeWorkbookState(filePath: string, state: ExcelWorkbookState) {
         cells: sheet.cells,
         ...(sheet.autoFilter ? { autoFilter: sheet.autoFilter } : {}),
         ...(sheet.freezeTopLeftCell ? { freezeTopLeftCell: sheet.freezeTopLeftCell } : {}),
+        ...(sheet.zoom !== undefined ? { zoom: sheet.zoom } : {}),
+        ...(sheet.showGridLines !== undefined ? { showGridLines: sheet.showGridLines } : {}),
+        ...(sheet.showHeadings !== undefined ? { showHeadings: sheet.showHeadings } : {}),
+        ...(sheet.tabColor ? { tabColor: sheet.tabColor } : {}),
+        ...(sheet.header ? { header: sheet.header } : {}),
+        ...(sheet.footer ? { footer: sheet.footer } : {}),
+        ...(sheet.orientation ? { orientation: sheet.orientation } : {}),
+        ...(sheet.paperSize !== undefined ? { paperSize: sheet.paperSize } : {}),
+        ...(sheet.fitToPage ? { fitToPage: sheet.fitToPage } : {}),
+        ...(sheet.protection !== undefined ? { protection: sheet.protection } : {}),
+        ...(sheet.rowBreaks?.length ? { rowBreaks: sheet.rowBreaks } : {}),
+        ...(sheet.colBreaks?.length ? { colBreaks: sheet.colBreaks } : {}),
       })),
       ...(Object.keys(state.settings).length > 0 ? { settings: state.settings } : {}),
       ...(state.styleSheetXml ? { styleSheetXml: state.styleSheetXml } : {}),
@@ -1042,11 +1096,21 @@ function mergeSheetXmlPreservingExtras(previousXml: string, nextXml: string) {
   const nextSheetViews = /<(?:\w+:)?sheetViews\b[\s\S]*?<\/(?:\w+:)?sheetViews>/.exec(nextXml)?.[0] ?? "";
   const nextSheetData = /<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/.exec(nextXml)?.[0] ?? "<sheetData/>";
   const nextAutoFilter = /<(?:\w+:)?autoFilter\b[^>]*\/?>/.exec(nextXml)?.[0] ?? "";
+  const nextSheetProtection = /<(?:\w+:)?sheetProtection\b[^>]*\/?>/.exec(nextXml)?.[0] ?? "";
+  const nextPageSetup = /<(?:\w+:)?pageSetup\b[^>]*\/?>/.exec(nextXml)?.[0] ?? "";
+  const nextHeaderFooter = /<(?:\w+:)?headerFooter\b[\s\S]*?<\/(?:\w+:)?headerFooter>/.exec(nextXml)?.[0] ?? "";
+  const nextRowBreaks = /<(?:\w+:)?rowBreaks\b[\s\S]*?<\/(?:\w+:)?rowBreaks>/.exec(nextXml)?.[0] ?? "";
+  const nextColBreaks = /<(?:\w+:)?colBreaks\b[\s\S]*?<\/(?:\w+:)?colBreaks>/.exec(nextXml)?.[0] ?? "";
 
   xml = replaceOrInsert(xml, /<(?:\w+:)?sheetPr\b[\s\S]*?<\/(?:\w+:)?sheetPr>/, nextSheetPr, /<(?:\w+:)?worksheet\b[^>]*>/);
   xml = replaceOrInsert(xml, /<(?:\w+:)?sheetViews\b[\s\S]*?<\/(?:\w+:)?sheetViews>/, nextSheetViews, /<(?:\w+:)?sheetPr\b[\s\S]*?<\/(?:\w+:)?sheetPr>|<(?:\w+:)?worksheet\b[^>]*>/);
   xml = replaceOrInsert(xml, /<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/, nextSheetData, /<(?:\w+:)?sheetViews\b[\s\S]*?<\/(?:\w+:)?sheetViews>|<(?:\w+:)?sheetPr\b[\s\S]*?<\/(?:\w+:)?sheetPr>|<(?:\w+:)?worksheet\b[^>]*>/);
   xml = replaceOrInsert(xml, /<(?:\w+:)?autoFilter\b[^>]*\/?>/, nextAutoFilter, /<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+  xml = replaceOrInsert(xml, /<(?:\w+:)?sheetProtection\b[^>]*\/?>/, nextSheetProtection, /<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+  xml = replaceOrInsert(xml, /<(?:\w+:)?pageSetup\b[^>]*\/?>/, nextPageSetup, /<(?:\w+:)?sheetProtection\b[^>]*\/?>|<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+  xml = replaceOrInsert(xml, /<(?:\w+:)?headerFooter\b[\s\S]*?<\/(?:\w+:)?headerFooter>/, nextHeaderFooter, /<(?:\w+:)?pageSetup\b[^>]*\/?>|<(?:\w+:)?sheetProtection\b[^>]*\/?>|<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+  xml = replaceOrInsert(xml, /<(?:\w+:)?rowBreaks\b[\s\S]*?<\/(?:\w+:)?rowBreaks>/, nextRowBreaks, /<(?:\w+:)?headerFooter\b[\s\S]*?<\/(?:\w+:)?headerFooter>|<(?:\w+:)?pageSetup\b[^>]*\/?>|<(?:\w+:)?sheetProtection\b[^>]*\/?>|<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+  xml = replaceOrInsert(xml, /<(?:\w+:)?colBreaks\b[\s\S]*?<\/(?:\w+:)?colBreaks>/, nextColBreaks, /<(?:\w+:)?rowBreaks\b[\s\S]*?<\/(?:\w+:)?rowBreaks>|<(?:\w+:)?headerFooter\b[\s\S]*?<\/(?:\w+:)?headerFooter>|<(?:\w+:)?pageSetup\b[^>]*\/?>|<(?:\w+:)?sheetProtection\b[^>]*\/?>|<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
   return xml;
 }
 
@@ -1414,6 +1478,15 @@ function parseSheetFeatures(xml: string) {
   const showGridLines = /showGridLines="([^"]+)"/.exec(sheetView ?? "")?.[1];
   const showHeadings = /showRowColHeaders="([^"]+)"/.exec(sheetView ?? "")?.[1];
   const tabColor = /<(?:\w+:)?tabColor\b[^>]*rgb="([^"]+)"/.exec(xml)?.[1];
+  const orientation = /<(?:\w+:)?pageSetup\b[^>]*orientation="([^"]+)"/.exec(xml)?.[1];
+  const paperSize = /<(?:\w+:)?pageSetup\b[^>]*paperSize="([^"]+)"/.exec(xml)?.[1];
+  const fitToWidth = /<(?:\w+:)?pageSetup\b[^>]*fitToWidth="([^"]+)"/.exec(xml)?.[1];
+  const fitToHeight = /<(?:\w+:)?pageSetup\b[^>]*fitToHeight="([^"]+)"/.exec(xml)?.[1];
+  const header = /<(?:\w+:)?oddHeader>([\s\S]*?)<\/(?:\w+:)?oddHeader>/.exec(xml)?.[1];
+  const footer = /<(?:\w+:)?oddFooter>([\s\S]*?)<\/(?:\w+:)?oddFooter>/.exec(xml)?.[1];
+  const protection = /<(?:\w+:)?sheetProtection\b[^>]*sheet="([^"]+)"/.exec(xml)?.[1];
+  const rowBreaks = [...xml.matchAll(/<(?:\w+:)?rowBreaks\b[\s\S]*?<brk\b[^>]*id="([^"]+)"/g)].map((match) => Number(match[1]));
+  const colBreaks = [...xml.matchAll(/<(?:\w+:)?colBreaks\b[\s\S]*?<brk\b[^>]*id="([^"]+)"/g)].map((match) => Number(match[1]));
   return {
     ...(autoFilter ? { autoFilter } : {}),
     ...(topLeftCell ? { freezeTopLeftCell: topLeftCell } : {}),
@@ -1421,6 +1494,14 @@ function parseSheetFeatures(xml: string) {
     ...(showGridLines !== undefined ? { showGridLines: isTruthy(showGridLines) } : {}),
     ...(showHeadings !== undefined ? { showHeadings: isTruthy(showHeadings) } : {}),
     ...(tabColor ? { tabColor } : {}),
+    ...(orientation ? { orientation } : {}),
+    ...(paperSize ? { paperSize: Number(paperSize) } : {}),
+    ...(fitToWidth || fitToHeight ? { fitToPage: `${fitToWidth ?? "1"}x${fitToHeight ?? "1"}` } : {}),
+    ...(header ? { header: decodeXml(header) } : {}),
+    ...(footer ? { footer: decodeXml(footer) } : {}),
+    ...(protection !== undefined ? { protection: isTruthy(protection) } : {}),
+    ...(rowBreaks.length > 0 ? { rowBreaks } : {}),
+    ...(colBreaks.length > 0 ? { colBreaks } : {}),
   };
 }
 
@@ -2063,6 +2144,13 @@ function normalizeRefMode(value: string) {
 function normalizeArgbColor(value: string) {
   const normalized = value.replace(/^#/, "").toUpperCase();
   return normalized.length === 6 ? `FF${normalized}` : normalized;
+}
+
+function parseBreakList(value: string) {
+  return value
+    .split(",")
+    .map((item) => Number(item.trim()))
+    .filter((item) => !Number.isNaN(item));
 }
 
 function isTruthy(value: string) {

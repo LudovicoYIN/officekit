@@ -18,10 +18,11 @@ import {
 } from "../../excel/src/adapter.js";
 import type {
   ExcelCellModel as ExcelCell,
+  ExcelWorkbookModel,
   ExcelNamedRangeModel as ExcelNamedRange,
   ExcelSheetModel as ExcelSheet,
   ExcelWorkbookSettings,
-} from "../../excel/src/adapter.js";
+} from "../../excel/src/model.js";
 
 export interface WordParagraph {
   text: string;
@@ -74,22 +75,7 @@ export interface OfficekitDocument {
     paragraphs?: WordParagraph[];
     tables?: WordTable[];
   };
-  excel?: {
-    path?: string;
-    type?: string;
-    sheets: Array<{
-      name: string;
-      cells: Record<string, ExcelCell>;
-      autoFilter?: string;
-      freezeTopLeftCell?: string;
-      zoom?: number;
-      showGridLines?: boolean;
-      showHeadings?: boolean;
-      tabColor?: string;
-    }>;
-    settings?: ExcelWorkbookSettings;
-    styleSheetXml?: string;
-    namedRanges?: ExcelNamedRange[];
+  excel?: ExcelWorkbookModel & {
     metadata?: Record<string, string>;
   };
   powerpoint?: { slides: PptSlide[] };
@@ -215,8 +201,6 @@ export async function setDocumentNode(filePath: string, targetPath: string, opti
         "Example: officekit set demo.docx /body/table[1]/cell[1,1] --prop text=Updated",
       );
     }
-  } else if (document.format === "excel") {
-    throw new UsageError("Excel operations are handled by the Excel adapter.");
   } else {
     const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
     const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
@@ -255,7 +239,7 @@ export async function removeDocumentNode(filePath: string, targetPath: string) {
       throw new UsageError("Word remove currently supports /body/p[n] or /body/table[n].");
     }
   } else if (document.format === "excel") {
-    removeExcelNode(document, targetPath);
+    throw new UsageError("Excel operations are handled by the Excel adapter.");
   } else {
     const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
     const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
