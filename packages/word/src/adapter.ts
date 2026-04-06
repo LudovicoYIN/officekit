@@ -75,7 +75,7 @@ function extractTextSimple(xml: string): string {
 function getParagraphsInfo(xml: string): Array<{ index: number; text: string; style?: string; paraId?: string }> {
   const paragraphs: Array<{ index: number; text: string; style?: string; paraId?: string }> = [];
 
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let idx = 0;
   while ((match = paraRegex.exec(xml)) !== null) {
@@ -104,15 +104,15 @@ function getParagraphsInfo(xml: string): Array<{ index: number; text: string; st
 function getTablesInfo(xml: string): Array<{ index: number; rows: number; cols: number }> {
   const tables: Array<{ index: number; rows: number; cols: number }> = [];
 
-  const tblRegex = /<w:tbl[\\s\\S]*?<\\/w:tbl>/g;
+  const tblRegex = /<w:tbl[\s\S]*?<\/w:tbl>/g;
   let match;
   let idx = 0;
   while ((match = tblRegex.exec(xml)) !== null) {
     idx++;
     const tblXml = match[0];
-    const rows = (tblXml.match(/<w:tr[\\s\\S]*?<\\/w:tr>/g) || []).length;
-    const firstRow = tblXml.match(/<w:tr[\\s\\S]*?<\\/w:tr>/);
-    const cols = firstRow ? (firstRow[0].match(/<w:tc[\\s\\S]*?<\\/w:tc>/g) || []).length : 0;
+    const rows = (tblXml.match(/<w:tr[\s\S]*?<\/w:tr>/g) || []).length;
+    const firstRow = tblXml.match(/<w:tr[\s\S]*?<\/w:tr>/);
+    const cols = firstRow ? (firstRow[0].match(/<w:tc[\s\S]*?<\/w:tc>/g) || []).length : 0;
     tables.push({ index: idx, rows, cols });
   }
 
@@ -175,7 +175,7 @@ export async function getWordNode(filePath: string, path: string, depth = 1): Pr
     }
 
     const segments = parsed.data?.segments || [];
-    const result = navigateToElement(documentXml, zip, segments, depth);
+    const result = await navigateToElement(documentXml, zip, segments, depth);
 
     if (!result) {
       return err("not_found", `Path not found: ${path}`);
@@ -193,7 +193,7 @@ export async function getWordNode(filePath: string, path: string, depth = 1): Pr
 /**
  * Navigates to an element based on path segments.
  */
-function navigateToElement(
+async function navigateToElement(
   documentXml: string,
   zip: JSZip,
   segments: PathSegment[],
@@ -412,7 +412,7 @@ function buildChildPath(parentPath: string, segments: PathSegment[]): string {
 function getRunsFromParagraph(documentXml: string, paraIndex: number): DocumentNode[] {
   const runs: DocumentNode[] = [];
 
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let idx = 0;
 
@@ -421,7 +421,7 @@ function getRunsFromParagraph(documentXml: string, paraIndex: number): DocumentN
     if (idx !== paraIndex) continue;
 
     const paraXml = match[0];
-    const runRegex = /<w:r[\\s\\S]*?<\\/w:r>/g;
+    const runRegex = /<w:r[\s\S]*?<\/w:r>/g;
     let runMatch;
     let runIdx = 0;
 
@@ -464,7 +464,7 @@ function getRunsFromParagraph(documentXml: string, paraIndex: number): DocumentN
 function parseStyles(stylesXml: string): DocumentNode[] {
   const styles: DocumentNode[] = [];
 
-  const styleRegex = /<w:style[^>]*>([\\s\\S]*?)<\\/w:style>/g;
+  const styleRegex = /<w:style[^>]*>([\s\S]*?)<\/w:style>/g;
   let match;
   let idx = 0;
 
@@ -861,14 +861,14 @@ function getAllRuns(documentXml: string): Array<{
     runIndex: number;
   }> = [];
 
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let paraIdx = 0;
 
   while ((match = paraRegex.exec(documentXml)) !== null) {
     paraIdx++;
     const paraXml = match[0];
-    const runRegex = /<w:r[\\s\\S]*?<\\/w:r>/g;
+    const runRegex = /<w:r[\s\S]*?<\/w:r>/g;
     let runMatch;
     let runIdx = 0;
 
@@ -944,7 +944,7 @@ function getContentControls(documentXml: string): Array<{
 }> {
   const sdts: Array<{ path: string; text: string; format: Record<string, unknown> }> = [];
 
-  const sdtRegex = /<w:sdt[\\s\\S]*?<\\/w:sdt>/g;
+  const sdtRegex = /<w:sdt[\s\S]*?<\/w:sdt>/g;
   let match;
   let idx = 0;
 
@@ -3077,7 +3077,7 @@ function getStyleNameFromId(stylesXml: string, styleId: string): string | null {
 }
 
 function hasRuns(xml: string, paraIndex: number): boolean {
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let idx = 0;
 
@@ -3085,7 +3085,7 @@ function hasRuns(xml: string, paraIndex: number): boolean {
     idx++;
     if (idx !== paraIndex) continue;
 
-    const runRegex = /<w:r[\\s\\S]*?<\\/w:r>/g;
+    const runRegex = /<w:r[\s\S]*?<\/w:r>/g;
     return runRegex.test(match[0]);
   }
 
@@ -3105,7 +3105,7 @@ interface RunInfo {
 function getRunsInfo(xml: string, paraIndex: number): RunInfo[] {
   const runs: RunInfo[] = [];
 
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let idx = 0;
 
@@ -3114,7 +3114,7 @@ function getRunsInfo(xml: string, paraIndex: number): RunInfo[] {
     if (idx !== paraIndex) continue;
 
     const paraXml = match[0];
-    const runRegex = /<w:r[\\s\\S]*?<\\/w:r>/g;
+    const runRegex = /<w:r[\s\S]*?<\/w:r>/g;
     let runMatch;
 
     while ((runMatch = runRegex.exec(paraXml)) !== null) {
@@ -3172,7 +3172,7 @@ function getHeadingLevel(styleId: string): number {
 }
 
 function hasFirstLineIndent(xml: string, paraIndex: number): boolean {
-  const paraRegex = /<w:p[\\s\\S]*?<\\/w:p>/g;
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
   let match;
   let idx = 0;
 
@@ -3190,7 +3190,7 @@ function hasFirstLineIndent(xml: string, paraIndex: number): boolean {
 function parseStylesForJson(stylesXml: string): Array<{ id: string; name: string; type: string }> {
   const styles: Array<{ id: string; name: string; type: string }> = [];
 
-  const styleRegex = /<w:style[^>]*>([\\s\\S]*?)<\\/w:style>/g;
+  const styleRegex = /<w:style[^>]*>([\s\S]*?)<\/w:style>/g;
   let match;
 
   while ((match = styleRegex.exec(stylesXml)) !== null) {
