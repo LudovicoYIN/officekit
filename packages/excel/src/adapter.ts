@@ -3468,6 +3468,8 @@ function evaluateFormulaExpression(
     STDEVP: (args) => evaluateStdevVarFormula(state, args, sheet, visited, false),
     VAR: (args) => evaluateVarFormula(state, args, sheet, visited, true),
     VARP: (args) => evaluateVarFormula(state, args, sheet, visited, false),
+    RANK: (args) => evaluateRankFormula(state, args, sheet, visited),
+    PERCENTILE: (args) => evaluatePercentileFormula(state, args, sheet, visited),
     AND: (args) => evaluateAndFormula(state, args, sheet, visited),
     OR: (args) => evaluateOrFormula(state, args, sheet, visited),
     NOT: (args) => evaluateNotFormula(state, args, sheet, visited),
@@ -3489,7 +3491,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|STDEV|STDEVP|VAR|VARP|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|STDEV|STDEVP|VAR|VARP|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -4148,6 +4150,31 @@ function evaluateVarFormula(state: ExcelWorkbookState | undefined, args: string,
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
   const sumSq = values.reduce((acc, v) => acc + (v - mean) * (v - mean), 0);
   return sumSq / (isSample ? values.length - 1 : values.length);
+}
+
+function evaluateRankFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const val = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+  const values = extractFormulaArgValues(state, parts[1] ?? "", sheet, visited);
+  const order = parts[2] !== undefined ? (firstNumericFormulaArg(state, parts[2], sheet, visited) ?? 0) : 0;
+  if (values.length === 0) return undefined;
+  const sorted = values.slice().sort((a, b) => order === 0 ? b - a : a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if (Math.abs(sorted[i] - val) < 1e-10) return i + 1;
+  }
+  return undefined;
+}
+
+function evaluatePercentileFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const values = extractFormulaArgValues(state, parts[0] ?? "", sheet, visited);
+  const k = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0;
+  if (values.length === 0 || k < 0 || k > 1) return undefined;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = k * (sorted.length - 1);
+  const lower = Math.floor(idx);
+  const upper = Math.min(lower + 1, sorted.length - 1);
+  return sorted[lower] + (idx - lower) * (sorted[upper] - sorted[lower]);
 }
 
 function evaluateChooseFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
