@@ -3413,6 +3413,8 @@ function evaluateFormulaExpression(
       }
       return count;
     },
+    IFS: (args) => evaluateIfsFormula(state, args, sheet, visited),
+    CHOOSE: (args) => evaluateChooseFormula(state, args, sheet, visited),
     INT: (args) => {
       const value = firstNumericFormulaArg(state, args, sheet, visited);
       return value === undefined ? undefined : Math.floor(value);
@@ -3479,7 +3481,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -4043,6 +4045,26 @@ function evaluatePvFormula(state: ExcelWorkbookState | undefined, args: string, 
   const fv = parts[3] !== undefined ? (firstNumericFormulaArg(state, parts[3], sheet, visited) ?? 0) : 0;
   if (rate === 0) return -(fv + pmt * nper);
   return -(fv / Math.pow(1 + rate, nper) + pmt * (1 - Math.pow(1 + rate, -nper)) / rate);
+}
+
+function evaluateIfsFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const condVal = firstNumericFormulaArg(state, parts[i].trim(), sheet, visited);
+    if (condVal !== undefined && condVal !== 0) {
+      return evaluateInlineFormulaArg(state, parts[i + 1].trim(), sheet, visited);
+    }
+  }
+  return undefined;
+}
+
+function evaluateChooseFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const idx = firstNumericFormulaArg(state, parts[0] ?? "1", sheet, visited);
+  if (idx === undefined) return undefined;
+  const normalizedIdx = Math.round(idx);
+  if (normalizedIdx < 1 || normalizedIdx >= parts.length) return undefined;
+  return evaluateInlineFormulaArg(state, parts[normalizedIdx].trim(), sheet, visited);
 }
 
 function evaluateRowColumnFormula(args: string, sheet: ExcelSheetModel, isRow: boolean) {
