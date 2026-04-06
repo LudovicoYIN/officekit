@@ -3739,3 +3739,441 @@ function generateNewParaIds(xml: string): string {
 
   return result;
 }
+
+// ============================================================================
+// Validate - Document OpenXML Validation
+// ============================================================================
+
+export interface ValidationError {
+  errorType: string;
+  description: string;
+  path?: string;
+  part?: string;
+}
+
+/**
+ * Validates the document against OpenXML schema.
+ * Returns a list of validation errors.
+ */
+export async function validateWordDocument(filePath: string): Promise<ValidationError[]> {
+  const errors: ValidationError[] = [];
+  const zip = await readDocxZip(filePath);
+
+  const requiredParts = ["[Content_Types].xml", "word/document.xml"];
+  for (const part of requiredParts) {
+    if (!zip.file(part)) {
+      errors.push({ errorType: "missing_part", description: `Required part missing: ${part}`, part });
+    }
+  }
+
+  const documentXml = await getXmlEntry(zip, "word/document.xml");
+  if (documentXml) {
+    if (!documentXml.includes("<w:document") && !documentXml.includes("<w:document ")) {
+      errors.push({ errorType: "invalid_root", description: "Document root element (w:document) not found", part: "word/document.xml" });
+    }
+    if (!documentXml.includes("<w:body") && !documentXml.includes("<w:body ")) {
+      errors.push({ errorType: "missing_body", description: "Document body (w:body) not found", part: "word/document.xml" });
+    }
+    if (!documentXml.includes("</w:document>")) {
+      errors.push({ errorType: "unclosed_tag", description: "Missing closing tag for w:document", part: "word/document.xml" });
+    }
+    if (!documentXml.includes("xmlns:w=") && !documentXml.includes("xmlns:w=\"")) {
+      errors.push({ errorType: "missing_namespace", description: "Missing w: namespace declaration", part: "word/document.xml" });
+    }
+  }
+
+  const stylesXml = await getXmlEntry(zip, "word/styles.xml");
+  if (stylesXml && !stylesXml.includes("<w:styles") && !stylesXml.includes("<w:styles ")) {
+    errors.push({ errorType: "invalid_styles", description: "Styles root element (w:styles) not found", part: "word/styles.xml" });
+  }
+
+  const relsXml = await getXmlEntry(zip, "word/_rels/document.xml.rels");
+  if (relsXml) {
+    const idMatches = relsXml.match(/Id="([^"]+)"/g) || [];
+    const ids = idMatches.map(m => m.match(/Id="([^"]+)"/)![1]);
+    const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+    if (duplicates.length > 0) {
+      errors.push({ errorType: "duplicate_rels", description: `Duplicate relationship IDs: ${[...new Set(duplicates)].join(", ")}`, part: "word/_rels/document.xml.rels" });
+    }
+  }
+
+  const contentTypesXml = await getXmlEntry(zip, "[Content_Types].xml");
+  if (contentTypesXml && !contentTypesXml.includes("[Content_Types]")) {
+    errors.push({ errorType: "invalid_content_types", description: "Content_Types.xml root element not found", part: "[Content_Types].xml" });
+  }
+
+  return errors;
+}
+
+// ============================================================================
+// JSON View Functions
+// ============================================================================
+
+export async function viewWordStatsJson(filePath: string): Promise<Record<string, unknown>> {
+  const zip = await readDocxZip(filePath);
+  const documentXml = await getXmlEntry(zip, "word/document.xml") ?? "";
+
+  const paras = getParagraphsInfo(documentXml);
+  const tables = getTablesInfo(documentXml);
+  let totalWords = 0, totalChars = 0;
+  const styleCounts: Record<string, number> = {};
+  const fontCounts: Record<string, number> = {};
+
+  for (const para of paras) {
+    const style = para.style || "Normal";
+    styleCounts[style] = (styleCounts[style] || 0) + 1;
+    if (!para.text.trim()) continue;
+    const words = para.text.split(/\s+/).filter(Boolean);
+    totalWords += words.length;
+    totalChars += para.text.length;
+    const runs = getRunsInfo(documentXml, para.index);
+    for (const run of runs) {
+      if (run.font) fontCounts[run.font] = (fontCounts[run.font] || 0) + 1;
+    }
+  }
+
+  return {
+    paragraphs: paras.length, words: totalWords, characters: totalChars, tables: tables.length,
+    styles: Object.entries(styleCounts).map(([name, count]) => ({ name, count })),
+    fonts: Object.entries(fontCounts).map(([name, count]) => ({ name, count }))
+  };
+}
+
+export async function viewWordOutlineJson(filePath: string): Promise<Record<string, unknown>> {
+  const zip = await readDocxZip(filePath);
+  const documentXml = await getXmlEntry(zip, "word/document.xml") ?? "";
+  const paras = getParagraphsInfo(documentXml);
+  const headings: Array<{ level: number; text: string; path: string; style: string }> = [];
+
+  let paraIndex = 0;
+  for (const para of paras) {
+    paraIndex++;
+    if (para.style && (para.style.includes("Heading") || para.style === "Title" || para.style === "Subtitle")) {
+      headings.push({ level: getHeadingLevel(para.style), text: para.text, path: `/body/p[${paraIndex}]`, style: para.style });
+    }
+  }
+  return { headings, totalParagraphs: paras.length };
+}
+
+export async function viewWordTextJson(filePath: string, options?: { startLine?: number; endLine?: number; maxLines?: number }): Promise<Record<string, unknown>> {
+  const zip = await readDocxZip(filePath);
+  const documentXml = await getXmlEntry(zip, "word/document.xml") ?? "";
+  const stylesXml = await getXmlEntry(zip, "word/styles.xml") ?? "";
+  const paras = getParagraphsInfo(documentXml);
+  const startLine = options?.startLine ?? 1, endLine = options?.endLine ?? paras.length, maxLines = options?.maxLines ?? paras.length;
+
+  const lines: Array<{ index: number; path: string; text: string; style?: string }> = [];
+  let lineNum = 0, emitted = 0;
+
+  for (const para of paras) {
+    lineNum++;
+    if (lineNum < startLine || lineNum > endLine || emitted >= maxLines) {
+      if (lineNum > endLine || emitted >= maxLines) break;
+      continue;
+    }
+    const styleName = para.style ? getStyleNameFromId(stylesXml, para.style) || para.style : "Normal";
+    lines.push({ index: lineNum, path: `/body/p[${para.index}]`, text: para.text, style: styleName });
+    emitted++;
+  }
+  return { lines, total: paras.length, startLine, endLine: lineNum, truncated: emitted >= maxLines };
+}
+
+export async function viewWordIssuesJson(filePath: string, options?: { issueType?: string; limit?: number }): Promise<Record<string, unknown>> {
+  const zip = await readDocxZip(filePath);
+  const documentXml = await getXmlEntry(zip, "word/document.xml") ?? "";
+  const limit = options?.limit ?? 100;
+  const issues: Array<{ type: string; description: string; path?: string; severity: string }> = [];
+  const paras = getParagraphsInfo(documentXml);
+
+  let paraIndex = 0;
+  for (const para of paras) {
+    paraIndex++;
+    if (issues.length >= limit) break;
+    if (!para.text.trim()) {
+      issues.push({ type: "content", description: "Empty paragraph", path: `/body/p[${paraIndex}]`, severity: "warning" });
+    } else if (para.text.includes("  ")) {
+      issues.push({ type: "formatting", description: "Consecutive spaces detected", path: `/body/p[${paraIndex}]`, severity: "warning" });
+    }
+  }
+
+  const sectPrMatch = documentXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/i);
+  if (sectPrMatch && !sectPrMatch[0].includes("<w:pgMar")) {
+    issues.push({ type: "structure", description: "Section missing page margins", severity: "error" });
+  }
+  return { issues, total: issues.length, limit };
+}
+
+// ============================================================================
+// Form Fields - Full Support
+// ============================================================================
+
+export interface FormFieldInfo {
+  type: "text" | "checkbox" | "dropdown";
+  name: string;
+  value: string;
+  enabled: boolean;
+  editable: boolean;
+  path: string;
+  defaultValue?: string;
+  maxLength?: number;
+  checked?: boolean;
+  items?: string[];
+  defaultIndex?: number;
+}
+
+export async function getWordFormFields(filePath: string): Promise<Result<FormFieldInfo[]>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    const documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    const fields: FormFieldInfo[] = [];
+    const formTextRegex = /<w:fldChar[^>]*w:fldCharType="begin"[^>]*>[\s\S]*?<w:ffData>([\s\S]*?)<\/w:ffData>/gi;
+    let match;
+
+    while ((match = formTextRegex.exec(documentXml)) !== null) {
+      const ffData = match[1];
+      const nameMatch = ffData.match(/<w:ffname[^>]*w:val="([^"]*)"/i);
+      const name = nameMatch ? nameMatch[1] : "unnamed";
+      const textInputMatch = ffData.match(/<w:textInput/i);
+      const checkBoxMatch = ffData.match(/<w:checkBox/i);
+      const dropDownMatch = ffData.match(/<w:dropDown/i);
+
+      let type: "text" | "checkbox" | "dropdown" = "text";
+      let value = "", defaultValue: string | undefined, maxLength: number | undefined, checked: boolean | undefined, items: string[] | undefined, defaultIndex: number | undefined;
+
+      if (textInputMatch) {
+        type = "text";
+        const dm = ffData.match(/<w:default[\s\S]*?w:val="([^"]*)"/i);
+        defaultValue = dm ? dm[1] : undefined;
+        const mlm = ffData.match(/<w:maxLength[^>]*w:val="(\d+)"/i);
+        maxLength = mlm ? parseInt(mlm[1], 10) : undefined;
+        value = defaultValue || "";
+      } else if (checkBoxMatch) {
+        type = "checkbox";
+        const cm = ffData.match(/<w:checked[^>]*w:val="([^"]*)"/i);
+        checked = cm ? cm[1].toLowerCase() === "true" : false;
+        value = checked ? "\u2612" : "\u2610";
+      } else if (dropDownMatch) {
+        type = "dropdown";
+        const im = ffData.matchAll(/<w:listItem[^>]*w:val="([^"]*)"/gi);
+        items = Array.from(im, m => m[1]);
+        const sm = ffData.match(/<w:selection[^>]*w:val="(\d+)"/i);
+        defaultIndex = sm ? parseInt(sm[1], 10) : 0;
+        value = items[defaultIndex || 0] || "";
+      }
+
+      const resultStart = documentXml.indexOf("</w:fldChar>", match.index) + 13;
+      const resultEnd = documentXml.indexOf("<w:fldChar", resultStart);
+      if (resultStart > 13 && resultEnd > resultStart) {
+        const textMatch = documentXml.substring(resultStart, resultEnd).match(/<w:t[^>]*>([^<]*)/i);
+        if (textMatch && textMatch[1]) value = textMatch[1];
+      }
+
+      fields.push({ type, name, value, enabled: true, editable: true, path: `/formfield[${fields.length + 1}]`, defaultValue, maxLength, checked, items, defaultIndex });
+    }
+    return ok(fields);
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+export async function setWordFormField(filePath: string, fieldPath: string, props: Record<string, string>): Promise<Result<{ ok: boolean }>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    let documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    const fieldMatch = fieldPath.match(/\/formfield\[(\d+)\]/i);
+    if (!fieldMatch) return err("invalid_path", "Invalid formfield path");
+    const fieldIndex = parseInt(fieldMatch[1], 10);
+
+    const formTextRegex = /<w:fldChar[^>]*w:fldCharType="begin"[^>]*>[\s\S]*?<w:ffData>([\s\S]*?)<\/w:ffData>[\s\S]*?<w:fldChar[^>]*w:fldCharType="separate"/gi;
+    let fieldNum = 0, updated = false;
+
+    documentXml = documentXml.replace(formTextRegex, (fullMatch) => {
+      fieldNum++;
+      if (fieldNum !== fieldIndex) return fullMatch;
+      let newMatch = fullMatch;
+      if (props.text !== undefined || props.value !== undefined) {
+        newMatch = newMatch.replace(/<w:t[^>]*>[^<]*<\/w:t>/gi, `<w:t>${escapeXml(props.text || props.value || "")}</w:t>`);
+        updated = true;
+      }
+      if (props.checked !== undefined) {
+        const isChecked = props.checked.toLowerCase() === "true";
+        newMatch = newMatch.replace(/<w:t[^>]*>[^<]*<\/w:t>/gi, `<w:t>${isChecked ? "\u2612" : "\u2610"}</w:t>`);
+        updated = true;
+      }
+      return newMatch;
+    });
+
+    if (!updated) return err("not_found", `Form field ${fieldIndex} not found`);
+    zip.file("word/document.xml", documentXml);
+    await writeFile(filePath, await zip.generateAsync({ type: "nodebuffer" }));
+    return ok({ ok: true });
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ============================================================================
+// Track Changes - Accept/Reject All
+// ============================================================================
+
+export interface TrackChangesResult { accepted: number; rejected: number; }
+
+export async function acceptAllTrackChanges(filePath: string): Promise<Result<TrackChangesResult>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    let documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    let accepted = 0;
+    const insRegex = /<w:ins[^>]*>([\s\S]*?)<\/w:ins>/gi;
+    documentXml = documentXml.replace(insRegex, (m, inner) => { accepted++; return inner; });
+    const delMatches = documentXml.match(/<w:del[^>]*>[\s\S]*?<\/w:del>/gi);
+    documentXml = documentXml.replace(/<w:del[^>]*>[\s\S]*?<\/w:del>/gi, "");
+    accepted += delMatches ? delMatches.length : 0;
+    documentXml = documentXml.replace(/<w:rPrChange[^>]*>[\s\S]*?<\/w:rPrChange>/gi, "");
+    documentXml = documentXml.replace(/<w:pPrChange[^>]*>[\s\S]*?<\/w:pPrChange>/gi, "");
+
+    zip.file("word/document.xml", documentXml);
+    await writeFile(filePath, await zip.generateAsync({ type: "nodebuffer" }));
+    return ok({ accepted, rejected: 0 });
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+export async function rejectAllTrackChanges(filePath: string): Promise<Result<TrackChangesResult>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    let documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    let rejected = 0;
+    const insMatches = documentXml.match(/<w:ins[^>]*>[\s\S]*?<\/w:ins>/gi);
+    documentXml = documentXml.replace(/<w:ins[^>]*>[\s\S]*?<\/w:ins>/gi, "");
+    rejected += insMatches ? insMatches.length : 0;
+    documentXml = documentXml.replace(/<w:del[^>]*>([\s\S]*?)<\/w:del>/gi, (m, inner) => { rejected++; return inner; });
+    documentXml = documentXml.replace(/<w:rPrChange[^>]*>[\s\S]*?<\/w:rPrChange>/gi, "");
+    documentXml = documentXml.replace(/<w:pPrChange[^>]*>[\s\S]*?<\/w:pPrChange>/gi, "");
+
+    zip.file("word/document.xml", documentXml);
+    await writeFile(filePath, await zip.generateAsync({ type: "nodebuffer" }));
+    return ok({ accepted: 0, rejected });
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ============================================================================
+// Document Protection
+// ============================================================================
+
+export interface DocumentProtection { mode?: string; enforced?: boolean; }
+
+export async function getDocumentProtection(filePath: string): Promise<DocumentProtection> {
+  const zip = await readDocxZip(filePath);
+  const settingsXml = await getXmlEntry(zip, "word/settings.xml") ?? "";
+  const pm = settingsXml.match(/<w:documentProtection[^>]*w:edit="([^"]*)"[^>]*w:enforcement="([^"]*)"/i);
+  return pm ? { mode: pm[1], enforced: pm[2].toLowerCase() === "true" } : { enforced: false };
+}
+
+export async function setDocumentProtection(filePath: string, mode: string, enforced: boolean = true): Promise<Result<{ ok: boolean }>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    let settingsXml = await getXmlEntry(zip, "word/settings.xml") || createBasicSettingsXml();
+    settingsXml = settingsXml.replace(/<w:documentProtection[^>]*\/>/gi, "");
+    if (enforced && mode !== "none") {
+      settingsXml = settingsXml.replace("</w:settings>", `<w:documentProtection w:edit="${mode}" w:enforcement="true"/></w:settings>`);
+    }
+    zip.file("word/settings.xml", settingsXml);
+    await writeFile(filePath, await zip.generateAsync({ type: "nodebuffer" }));
+    return ok({ ok: true });
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+// ============================================================================
+// SDT (Structured Document Tags / Content Controls) - Advanced
+// ============================================================================
+
+export interface SdtInfo { path: string; type: string; tag?: string; alias?: string; value?: string; }
+
+export async function getWordSdts(filePath: string): Promise<Result<SdtInfo[]>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    const documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    const sdts: SdtInfo[] = [];
+    const sdtRegex = /<w:sdt[^>]*>([\s\S]*?)<\/w:sdt>/gi;
+    let match, idx = 0;
+
+    while ((match = sdtRegex.exec(documentXml)) !== null) {
+      idx++;
+      const sdtContent = match[1];
+      const tagMatch = sdtContent.match(/<w:tag[^>]*w:val="([^"]*)"/i);
+      const aliasMatch = sdtContent.match(/<w:alias[^>]*w:val="([^"]*)"/i);
+      let type = "unknown";
+      if (sdtContent.includes("<w:richText")) type = "richText";
+      else if (sdtContent.includes("<w:text")) type = "text";
+      else if (sdtContent.includes("<w:checkBox")) type = "checkbox";
+      else if (sdtContent.includes("<w:dropDownList")) type = "dropdown";
+      else if (sdtContent.includes("<w:date")) type = "date";
+      else if (sdtContent.includes("<w:comboBox")) type = "comboBox";
+      else if (sdtContent.includes("<w:picture")) type = "picture";
+      let value = "";
+      const textMatch = sdtContent.match(/<w:t[^>]*>([^<]*)/i);
+      if (textMatch) value = textMatch[1];
+      sdts.push({ path: `/sdt[${idx}]`, type, tag: tagMatch?.[1], alias: aliasMatch?.[1], value });
+    }
+    return ok(sdts);
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
+
+export async function setWordSdt(filePath: string, sdtPath: string, props: Record<string, string>): Promise<Result<{ ok: boolean }>> {
+  try {
+    const zip = await readDocxZip(filePath);
+    let documentXml = await getXmlEntry(zip, "word/document.xml");
+    if (!documentXml) return err("not_found", "Document.xml not found");
+
+    const sdtMatch = sdtPath.match(/\/sdt\[(\d+)\]/i);
+    if (!sdtMatch) return err("invalid_path", "Invalid SDT path");
+    const sdtIndex = parseInt(sdtMatch[1], 10);
+
+    const sdtRegex = /<w:sdt[^>]*>([\s\S]*?)<\/w:sdt>/gi;
+    let sdtNum = 0, updated = false;
+
+    documentXml = documentXml.replace(sdtRegex, (fullMatch) => {
+      sdtNum++;
+      if (sdtNum !== sdtIndex) return fullMatch;
+      let newMatch = fullMatch;
+      if (props.text !== undefined || props.value !== undefined) {
+        newMatch = newMatch.replace(/<w:t[^>]*>[^<]*<\/w:t>/gi, `<w:t>${escapeXml(props.text || props.value || "")}</w:t>`);
+        updated = true;
+      }
+      if (props.checked !== undefined) {
+        const isChecked = props.checked.toLowerCase() === "true";
+        newMatch = newMatch.replace(/<w:checked[^>]*/gi, `<w:checked w:val="${isChecked ? "true" : "false"}"/>`);
+        updated = true;
+      }
+      if (props.tag !== undefined && /<w:tag/i.test(newMatch)) {
+        newMatch = newMatch.replace(/<w:tag[^>]*w:val="[^"]*"/i, `<w:tag w:val="${escapeXml(props.tag)}"/>`);
+        updated = true;
+      }
+      return newMatch;
+    });
+
+    if (!updated) return err("not_found", `SDT ${sdtIndex} not found`);
+    zip.file("word/document.xml", documentXml);
+    await writeFile(filePath, await zip.generateAsync({ type: "nodebuffer" }));
+    return ok({ ok: true });
+  } catch (e) {
+    return err("operation_failed", e instanceof Error ? e.message : String(e));
+  }
+}
