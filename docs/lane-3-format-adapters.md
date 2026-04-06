@@ -1,0 +1,136 @@
+# Lane 3 — format-adapter architecture audit
+
+This lane owns the parity-first adapter shape for `packages/word`, `packages/excel`, and `packages/ppt`.
+
+## Source evidence
+
+The current C# source exposes format-specific handlers plus partial-file helper families:
+
+### Word
+- Root handler: `OfficeCLI/src/officecli/Handlers/WordHandler.cs`
+- Partial families:
+  - `WordHandler.Add*.cs`
+  - `WordHandler.FormFields.cs`
+  - `WordHandler.HtmlPreview*.cs`
+  - `WordHandler.Mutations.cs`
+  - `WordHandler.Navigation*.cs`
+  - `WordHandler.Query.cs`
+  - `WordHandler.Selector.cs`
+  - `WordHandler.Set*.cs`
+  - `WordHandler.StyleList.cs`
+  - `WordHandler.View.cs`
+- Public surface observed:
+  - `Add`, `AddPart`
+  - `Get`, `Query`
+  - `Set`
+  - `Remove`, `Move`, `Swap`, `CopyFrom`
+  - `Raw`, `RawSet`, `Batch`
+  - `ViewAsText`, `ViewAsAnnotated`, `ViewAsOutline`, `ViewAsStats`, `ViewAsIssues`
+  - `ViewAsHtml`, `ViewAsForms`
+
+### Excel
+- Root handler: `OfficeCLI/src/officecli/Handlers/ExcelHandler.cs`
+- Partial families:
+  - `ExcelHandler.Add.cs`
+  - `ExcelHandler.Helpers.cs`
+  - `ExcelHandler.HtmlPreview*.cs`
+  - `ExcelHandler.Import.cs`
+  - `ExcelHandler.Query.cs`
+  - `ExcelHandler.Remove.cs`
+  - `ExcelHandler.Selector.cs`
+  - `ExcelHandler.Set*.cs`
+  - `ExcelHandler.View.cs`
+- Core helper clusters with format relevance:
+  - `ExcelStyleManager.cs`
+  - `FormulaEvaluator*.cs`
+  - `FormulaParser.cs`
+  - `Chart*.cs`
+  - `PivotTableHelper.cs`
+- Public surface observed:
+  - `Add`, `AddPart`
+  - `Get`, `Query`
+  - `Set`
+  - `Remove`, `Move`, `Swap`, `CopyFrom`
+  - `Import`
+  - `Raw`, `RawSet`
+  - `ViewAsText`, `ViewAsAnnotated`, `ViewAsOutline`, `ViewAsStats`, `ViewAsIssues`
+  - `ViewAsHtml`
+
+### PowerPoint
+- Root handler: `OfficeCLI/src/officecli/Handlers/PowerPointHandler.cs`
+- Partial families:
+  - `PowerPointHandler.Add*.cs`
+  - `PowerPointHandler.Align.cs`
+  - `PowerPointHandler.Animations.cs`
+  - `PowerPointHandler.Background.cs`
+  - `PowerPointHandler.Chart.cs`
+  - `PowerPointHandler.Effects.cs`
+  - `PowerPointHandler.Fill.cs`
+  - `PowerPointHandler.Helpers.cs`
+  - `PowerPointHandler.HtmlPreview*.cs`
+  - `PowerPointHandler.Hyperlinks.cs`
+  - `PowerPointHandler.Mutations.cs`
+  - `PowerPointHandler.NodeBuilder.cs`
+  - `PowerPointHandler.Notes.cs`
+  - `PowerPointHandler.Query.cs`
+  - `PowerPointHandler.Selector.cs`
+  - `PowerPointHandler.Set*.cs`
+  - `PowerPointHandler.ShapeProperties.cs`
+  - `PowerPointHandler.SvgPreview.cs`
+  - `PowerPointHandler.Theme.cs`
+  - `PowerPointHandler.View.cs`
+- Public surface observed:
+  - `Add`, `AddPart`
+  - `Get`, `Query`
+  - `Set`
+  - `Remove`, `Move`, `Swap`, `CopyFrom`
+  - `Raw`, `RawSet`, `Batch`
+  - `ViewAsText`, `ViewAsAnnotated`, `ViewAsOutline`, `ViewAsStats`, `ViewAsIssues`
+  - `ViewAsHtml`, `ViewAsSvg`
+  - `CheckShapeTextOverflow`
+
+## Target package boundaries
+
+| Package | Own now | Do not pull into shared core yet |
+| --- | --- | --- |
+| `packages/word` | document/body structure, section layout, styles/doc settings, forms, headers/footers, Word HTML preview | generic selector grammar, output envelope, filesystem helpers |
+| `packages/excel` | workbook/sheet/range semantics, formulas, charts, pivots, import, style manager, Excel HTML preview | common query parser, color/unit helpers unless reused elsewhere |
+| `packages/ppt` | slide/shape/table/media/theme/layout behavior, SVG/HTML preview, overflow checks, notes/animations/effects | cross-format preview server, normalized command routing |
+
+## Guardrails
+
+1. Preserve parity families before unifying implementation details.
+2. Keep package manifests local until `packages/core` contracts are proven by at least two formats.
+3. Treat MCP as explicitly excluded for v1.
+4. Keep preview behavior format-local for now; only the watch server should become shared later.
+5. Avoid binding package APIs to OfficeCLI command names. Preserve capability families instead.
+
+## Initial implementation shipped in this lane
+
+- Added package-local manifests for `@officekit/word`, `@officekit/excel`, and `@officekit/ppt`.
+- Added package-local backlog helpers that encode parity-critical milestones and risks.
+- Added package-local tests that protect:
+  - source-lineage references
+  - parity-critical capability families
+  - explicit MCP exclusion
+  - preview and long-tail feature expectations
+
+## Parity risks to carry forward
+
+| Package | Highest-risk families | Why |
+| --- | --- | --- |
+| Word | section layout, doc defaults/compatibility, chart rendering inside HTML preview, forms | behavior is spread across many partials and settings helpers |
+| Excel | formulas, charts, pivots, styles, filtered raw views | sheet semantics and helper clusters are tightly coupled |
+| PowerPoint | theme/layout inheritance, animations/effects, chart/media handling, SVG fidelity, overflow checks | the handler mixes structural mutations with rendering concerns |
+
+## Evidence generated by this lane
+
+- Audited source handler and helper families from `OfficeCLI/src/officecli/Handlers/*` and `OfficeCLI/src/officecli/Core/*`
+- Created package-local manifests under:
+  - `packages/word/src/manifest.js`
+  - `packages/excel/src/manifest.js`
+  - `packages/ppt/src/manifest.js`
+- Added package tests under:
+  - `packages/word/test/manifest.test.js`
+  - `packages/excel/test/manifest.test.js`
+  - `packages/ppt/test/manifest.test.js`

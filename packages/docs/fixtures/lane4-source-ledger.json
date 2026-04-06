@@ -1,0 +1,108 @@
+{
+  "sourceProduct": "OfficeCLI",
+  "targetProduct": "officekit",
+  "lineageNote": "This version is migrated from OfficeCLI into a Node.js + Bun-native workspace.",
+  "families": [
+    {
+      "id": "preview",
+      "label": "Preview / watch / HTML rendering",
+      "targetPackage": "@officekit/preview",
+      "verificationLayer": [
+        "unit",
+        "snapshot",
+        "parity"
+      ],
+      "status": "scaffolded",
+      "sourceFiles": [
+        "OfficeCLI/src/officecli/CommandBuilder.View.cs",
+        "OfficeCLI/src/officecli/CommandBuilder.Watch.cs",
+        "OfficeCLI/src/officecli/Core/WatchServer.cs",
+        "OfficeCLI/src/officecli/Core/WatchNotifier.cs",
+        "OfficeCLI/src/officecli/Core/HtmlPreviewHelper.cs",
+        "OfficeCLI/src/officecli/Resources/preview.css",
+        "OfficeCLI/src/officecli/Resources/preview.js",
+        "OfficeCLI/src/officecli/Handlers/Word/WordHandler.HtmlPreview.cs",
+        "OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.HtmlPreview.cs",
+        "OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview.cs"
+      ],
+      "requiredBehaviors": [
+        "Self-contained HTML preview shell for .docx/.xlsx/.pptx",
+        "Live watch page with event-stream-driven refresh",
+        "Bootstrap state when no rendered update has been pushed yet",
+        "Preview metadata contract that later CLI handlers can populate"
+      ]
+    },
+    {
+      "id": "skills",
+      "label": "Skill catalog / skill install flow",
+      "targetPackage": "@officekit/skills",
+      "verificationLayer": [
+        "unit",
+        "parity"
+      ],
+      "status": "scaffolded",
+      "sourceFiles": [
+        "OfficeCLI/SKILL.md",
+        "OfficeCLI/skills/officecli-docx/SKILL.md",
+        "OfficeCLI/skills/officecli-pptx/SKILL.md",
+        "OfficeCLI/skills/officecli-xlsx/SKILL.md",
+        "OfficeCLI/src/officecli/Program.cs",
+        "OfficeCLI/src/officecli/Core/SkillInstaller.cs"
+      ],
+      "requiredBehaviors": [
+        "Base officekit skill text keeps agent-first onboarding",
+        "Known agent targets map to home-directory skill folders",
+        "Skill catalog retains specialized guide names for later porting",
+        "Installed skill text uses officekit branding plus explicit OfficeCLI lineage"
+      ]
+    },
+    {
+      "id": "install",
+      "label": "Install / update / config surface",
+      "targetPackage": "@officekit/install",
+      "verificationLayer": [
+        "unit",
+        "parity"
+      ],
+      "status": "scaffolded",
+      "sourceFiles": [
+        "OfficeCLI/install.sh",
+        "OfficeCLI/install.ps1",
+        "OfficeCLI/src/officecli/Program.cs",
+        "OfficeCLI/src/officecli/Core/Installer.cs",
+        "OfficeCLI/src/officecli/Core/UpdateChecker.cs"
+      ],
+      "requiredBehaviors": [
+        "Release manifest captures per-platform asset naming",
+        "PATH/profile guidance remains automated where safe",
+        "Skill-install hints remain part of onboarding",
+        "Config/update surfaces are tracked for later CLI wiring"
+      ]
+    },
+    {
+      "id": "docs",
+      "label": "Docs / help / README lineage",
+      "targetPackage": "@officekit/docs",
+      "verificationLayer": [
+        "unit",
+        "parity",
+        "docs"
+      ],
+      "status": "scaffolded",
+      "sourceFiles": [
+        "OfficeCLI/README.md",
+        "OfficeCLI/README_zh.md",
+        "OfficeCLI/README_ja.md",
+        "OfficeCLI/README_ko.md",
+        "OfficeCLI/src/officecli/HelpCommands.cs",
+        "OfficeCLI/src/officecli/WikiHelpLoader.cs"
+      ],
+      "requiredBehaviors": [
+        "Root README explicitly says this version is migrated from OfficeCLI",
+        "Audience lanes stay explicit for AI agents, developers, and maintainers",
+        "Help topics remain organized by format + verb + optional element/property",
+        "Migration docs distinguish scaffolded vs implemented vs verified capabilities"
+      ]
+    }
+  ]
+}
