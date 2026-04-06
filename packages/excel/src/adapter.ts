@@ -3388,6 +3388,30 @@ function evaluateFormulaExpression(
       const value = firstNumericFormulaArg(state, args, sheet, visited);
       return value === undefined || value < 0 ? undefined : Math.sqrt(value);
     },
+    INT: (args) => {
+      const value = firstNumericFormulaArg(state, args, sheet, visited);
+      return value === undefined ? undefined : Math.floor(value);
+    },
+    TRUNC: (args) => {
+      const value = firstNumericFormulaArg(state, args, sheet, visited);
+      if (value === undefined) return undefined;
+      const digits = splitFormulaArgs(args).length > 1
+        ? (firstNumericFormulaArg(state, splitFormulaArgs(args)[1] ?? "0", sheet, visited) ?? 0) : 0;
+      const factor = Math.pow(10, digits);
+      return Math.trunc(value * factor) / factor;
+    },
+    SIGN: (args) => {
+      const value = firstNumericFormulaArg(state, args, sheet, visited);
+      return value === undefined ? undefined : value > 0 ? 1 : value < 0 ? -1 : 0;
+    },
+    PI: () => Math.PI,
+    RAND: () => Math.random(),
+    RANDBETWEEN: (args) => {
+      const parts = splitFormulaArgs(args);
+      const bottom = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+      const top = firstNumericFormulaArg(state, parts[1] ?? "1", sheet, visited) ?? 1;
+      return Math.floor(bottom) + Math.floor(Math.random() * (Math.floor(top) - Math.floor(bottom) + 1));
+    },
     AND: (args) => evaluateAndFormula(state, args, sheet, visited),
     OR: (args) => evaluateOrFormula(state, args, sheet, visited),
     NOT: (args) => evaluateNotFormula(state, args, sheet, visited),
@@ -3409,7 +3433,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
