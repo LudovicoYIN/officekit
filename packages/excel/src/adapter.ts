@@ -3464,6 +3464,10 @@ function evaluateFormulaExpression(
     NPV: (args) => evaluateNpvFormula(state, args, sheet, visited),
     IPMT: (args) => evaluateIpmtFormula(state, args, sheet, visited),
     PPMT: (args) => evaluatePpmtFormula(state, args, sheet, visited),
+    SLN: (args) => { const parts = splitFormulaArgs(args); const cost = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0; const salvage = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0; const life = firstNumericFormulaArg(state, parts[2] ?? "1", sheet, visited) ?? 1; return life === 0 ? undefined : (cost - salvage) / life; },
+    SYD: (args) => { const parts = splitFormulaArgs(args); const cost = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0; const salvage = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0; const life = Math.max(1, firstNumericFormulaArg(state, parts[2] ?? "1", sheet, visited) ?? 1); const period = Math.max(1, Math.round(firstNumericFormulaArg(state, parts[3] ?? "1", sheet, visited) ?? 1)); return (cost - salvage) * 2 * (life - period + 1) / (life * (life + 1)); },
+    DB: (args) => { const parts = splitFormulaArgs(args); const cost = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0; const salvage = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0; const life = Math.max(1, firstNumericFormulaArg(state, parts[2] ?? "1", sheet, visited) ?? 1); const period = Math.max(1, Math.round(firstNumericFormulaArg(state, parts[3] ?? "1", sheet, visited) ?? 1)); const rate = Math.round(1 - Math.pow(salvage / cost, 1.0 / life) * 1000) / 1000; let total = 0; for (let p = 1; p <= period; p++) { const dep = (cost - total) * rate; total += dep; if (p === period) return dep; } return 0; },
+    DDB: (args) => { const parts = splitFormulaArgs(args); const cost = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0; const salvage = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0; const life = Math.max(1, firstNumericFormulaArg(state, parts[2] ?? "1", sheet, visited) ?? 1); const period = Math.max(1, Math.round(firstNumericFormulaArg(state, parts[3] ?? "1", sheet, visited) ?? 1)); const factor = parts[4] !== undefined ? (firstNumericFormulaArg(state, parts[4], sheet, visited) ?? 2) : 2; let bv = cost; for (let p = 1; p <= period; p++) { const dep = Math.min(bv * factor / life, Math.max(bv - salvage, 0)); bv -= dep; if (p === period) return dep; } return 0; },
     STDEV: (args) => evaluateStdevVarFormula(state, args, sheet, visited, true),
     STDEVP: (args) => evaluateStdevVarFormula(state, args, sheet, visited, false),
     VAR: (args) => evaluateVarFormula(state, args, sheet, visited, true),
@@ -3486,6 +3490,9 @@ function evaluateFormulaExpression(
     MODE: (args) => evaluateModeFormula(state, args, sheet, visited),
     LARGE: (args) => evaluateLargeSmallFormula(state, args, sheet, visited, true),
     SMALL: (args) => evaluateLargeSmallFormula(state, args, sheet, visited, false),
+    GEOMEAN: (args) => { const values = extractFormulaArgValues(state, args, sheet, visited).filter(v => v > 0); if (values.length === 0) return undefined; const product = values.reduce((acc, v) => acc * v, 1); return Math.pow(product, 1 / values.length); },
+    HARMEAN: (args) => { const values = extractFormulaArgValues(state, args, sheet, visited).filter(v => v > 0); if (values.length === 0) return undefined; const sumReciprocals = values.reduce((acc, v) => acc + 1 / v, 0); if (sumReciprocals === 0) return undefined; return values.length / sumReciprocals; },
+    PERCENTRANK: (args) => { const parts = splitFormulaArgs(args); const arrayArg = parts[0] ?? ""; const val = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited); const significance = parts[2] !== undefined ? Math.max(0, Math.round(firstNumericFormulaArg(state, parts[2], sheet, visited) ?? 0)) : 0; if (arrayArg.trim() === "" || val === undefined) return undefined; const range = resolveRangeReference(state, arrayArg.trim(), sheet); if (!range) return undefined; const arrValues: number[] = []; for (const row of range.cells) { for (const cell of row) { if (cell && cell.value !== "" && !isNaN(Number(cell.value))) arrValues.push(Number(cell.value)); } } if (arrValues.length === 0) return undefined; arrValues.sort((a, b) => a - b); const countLess = arrValues.filter(v => v < val).length; const n = arrValues.length; if (n === 1) return 1; const rank = countLess / (n - 1); if (significance === 0) return rank; return Math.round(rank * Math.pow(10, significance)) / Math.pow(10, significance); },
     SIN: (args) => {
       const value = firstNumericFormulaArg(state, args, sheet, visited);
       return value === undefined ? undefined : Math.sin(value);
@@ -3589,12 +3596,24 @@ function evaluateFormulaExpression(
       if (num === undefined || mult === undefined || mult === 0) return undefined;
       return Math.round(num / mult) * mult;
     },
+    ISLOGICAL: (args) => { const parts = splitFormulaArgs(args); const cell = resolveCellRef(parts[0] ?? "", sheet); return cell?.type === "boolean" ? 1 : 0; },
+    ISNONTEXT: (args) => { const parts = splitFormulaArgs(args); const cell = resolveCellRef(parts[0] ?? "", sheet); return cell?.type !== "string" ? 1 : 0; },
+    TYPE: (args) => { const parts = splitFormulaArgs(args); const cell = resolveCellRef(parts[0] ?? "", sheet); if (!cell) return 1; if (cell.type === "boolean") return 4; if (cell.type === "string") return 2; return 1; },
+    NA: () => undefined,
+    ERROR_TYPE: (args) => { const parts = splitFormulaArgs(args); const val = firstNumericFormulaArg(state, parts[0] ?? "", sheet, visited); if (val === undefined) return 1; return 0; },
+    STDEV_S: (args) => evaluateStdevVarFormula(state, args, sheet, visited, true),
+    STDEV_P: (args) => evaluateStdevVarFormula(state, args, sheet, visited, false),
+    VAR_S: (args) => evaluateVarFormula(state, args, sheet, visited, true),
+    VAR_P: (args) => evaluateVarFormula(state, args, sheet, visited, false),
+    MODE_SNGL: (args) => evaluateModeFormula(state, args, sheet, visited),
+    RANK_EQ: (args) => evaluateRankFormula(state, args, sheet, visited),
+    PERCENTILE_INC: (args) => evaluatePercentileFormula(state, args, sheet, visited),
   };
 
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|STDEV|STDEVP|VAR|VARP|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ATAN|ATAN2|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ISLOGICAL|ISNONTEXT|TYPE|NA|ERROR_TYPE|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|STDEV|STDEVP|VAR|VARP|STDEV_S|STDEV_P|VAR_S|VAR_P|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ATAN|ATAN2|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND|MODE_SNGL|RANK_EQ|PERCENTILE_INC)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -3745,7 +3764,7 @@ function evaluateRoundFormula(
 }
 
 function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, expression: string, sheet: ExcelSheetModel) {
-  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE)\((.*)\)$/i.exec(expression);
+  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE|TEXT|FIXED|NUMBERVALUE|DOLLAR|YEN|T|N)\((.*)\)$/i.exec(expression);
   if (!direct) return undefined;
   const fn = direct[1].toUpperCase();
   const args = splitFormulaArgs(direct[2]);
@@ -3836,6 +3855,39 @@ function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, ex
   if (fn === "CODE") {
     const text = resolveText(args[0] ?? "");
     return String(text.length > 0 ? text.charCodeAt(0) : 0);
+  }
+  if (fn === "TEXT") {
+    const val = Number(firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0);
+    const fmt = resolveText(args[1] ?? "0");
+    try { return val.toString(fmt.replace(/#/g, '0')); } catch { return String(val); }
+  }
+  if (fn === "FIXED") {
+    const val = firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0;
+    const d = args[1] !== undefined ? (Number(firstNumericFormulaArg(state, args[1], sheet, new Set())) ?? 2) : 2;
+    const nc = args[2] !== undefined && firstNumericFormulaArg(state, args[2], sheet, new Set()) !== 0;
+    return val.toLocaleString('en', {minimumFractionDigits: d, maximumFractionDigits: d});
+  }
+  if (fn === "NUMBERVALUE") {
+    const s = resolveText(args[0] ?? "").replace(/,/g, "").trim();
+    return Number.isFinite(Number(s)) ? String(Number(s)) : undefined;
+  }
+  if (fn === "DOLLAR") {
+    const val = firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0;
+    const d = args[1] !== undefined ? (Number(firstNumericFormulaArg(state, args[1], sheet, new Set())) ?? 2) : 2;
+    return "$" + val.toLocaleString('en', {minimumFractionDigits: d, maximumFractionDigits: d});
+  }
+  if (fn === "YEN") {
+    const val = firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0;
+    const d = args[1] !== undefined ? (Number(firstNumericFormulaArg(state, args[1], sheet, new Set())) ?? 2) : 2;
+    return "\u00A5" + val.toLocaleString('en', {minimumFractionDigits: d, maximumFractionDigits: d});
+  }
+  if (fn === "T") {
+    const val = evaluateTextFormulaArg(state, args[0] ?? "", sheet);
+    return typeof val === 'string' && val !== "" ? val : "";
+  }
+  if (fn === "N") {
+    const val = firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set());
+    return val ?? 0;
   }
   return undefined;
 }
