@@ -6,7 +6,13 @@
   "scripts": {
     "test": "bun test"
   },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  },
   "exports": {
-    ".": "./src/index.js"
+    ".": "./src/index.js",
+    "./path": "./src/path.js",
+    "./selectors": "./src/selectors.js",
+    "./adapter": "./src/adapter.js"
   }
 }
