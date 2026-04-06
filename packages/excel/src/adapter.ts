@@ -3412,6 +3412,9 @@ function evaluateFormulaExpression(
       const top = firstNumericFormulaArg(state, parts[1] ?? "1", sheet, visited) ?? 1;
       return Math.floor(bottom) + Math.floor(Math.random() * (Math.floor(top) - Math.floor(bottom) + 1));
     },
+    PMT: (args) => evaluatePmtFormula(state, args, sheet, visited),
+    FV: (args) => evaluateFvFormula(state, args, sheet, visited),
+    PV: (args) => evaluatePvFormula(state, args, sheet, visited),
     AND: (args) => evaluateAndFormula(state, args, sheet, visited),
     OR: (args) => evaluateOrFormula(state, args, sheet, visited),
     NOT: (args) => evaluateNotFormula(state, args, sheet, visited),
@@ -3433,7 +3436,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|PMT|FV|PV)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -3967,6 +3970,36 @@ function evaluateLargeSmallFormula(state: ExcelWorkbookState | undefined, args: 
   if (values.length === 0 || k === undefined || k < 1 || k > values.length) return undefined;
   const sorted = values.slice().sort((a, b) => isLarge ? b - a : a - b);
   return sorted[Math.round(k) - 1];
+}
+
+function evaluatePmtFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const rate = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+  const nper = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0;
+  const pv = firstNumericFormulaArg(state, parts[2] ?? "0", sheet, visited) ?? 0;
+  const fv = parts[3] !== undefined ? (firstNumericFormulaArg(state, parts[3], sheet, visited) ?? 0) : 0;
+  if (rate === 0) return -(pv + fv) / nper;
+  return -(rate * (pv * Math.pow(1 + rate, nper) + fv)) / (Math.pow(1 + rate, nper) - 1);
+}
+
+function evaluateFvFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const rate = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+  const nper = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0;
+  const pmt = firstNumericFormulaArg(state, parts[2] ?? "0", sheet, visited) ?? 0;
+  const pv = parts[3] !== undefined ? (firstNumericFormulaArg(state, parts[3], sheet, visited) ?? 0) : 0;
+  if (rate === 0) return -(pv + pmt * nper);
+  return -(pv * Math.pow(1 + rate, nper) + pmt * (Math.pow(1 + rate, nper) - 1) / rate);
+}
+
+function evaluatePvFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const parts = splitFormulaArgs(args);
+  const rate = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited) ?? 0;
+  const nper = firstNumericFormulaArg(state, parts[1] ?? "0", sheet, visited) ?? 0;
+  const pmt = firstNumericFormulaArg(state, parts[2] ?? "0", sheet, visited) ?? 0;
+  const fv = parts[3] !== undefined ? (firstNumericFormulaArg(state, parts[3], sheet, visited) ?? 0) : 0;
+  if (rate === 0) return -(fv + pmt * nper);
+  return -(fv / Math.pow(1 + rate, nper) + pmt * (1 - Math.pow(1 + rate, -nper)) / rate);
 }
 
 function resolveCellRef(arg: string, sheet: ExcelSheetModel) {
