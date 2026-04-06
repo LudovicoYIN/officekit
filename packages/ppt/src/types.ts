@@ -684,3 +684,13 @@ export interface ParsedSelector {
   /** Adjacent sibling combinator */
   adjacentSibling?: boolean;
 }
+
+// ============================================================================
+// Document Handle Types
+// ============================================================================
+
+/**
+ * A unique identifier for an open document in memory.
+ * Used for handle-based operations to avoid repeated file I/O.
+ */
+export type DocumentHandle = string;
