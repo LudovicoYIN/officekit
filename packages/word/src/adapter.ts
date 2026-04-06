@@ -1638,32 +1638,301 @@ function insertAtPosition(docXml: string, insertXml: string, position: string | 
 
 /**
  * Helper: Process find and replace/format
+ *
+ * This function finds text in a Word document XML and optionally replaces it
+ * and/or applies formatting. It processes paragraphs and runs to correctly
+ * handle text that may span multiple runs.
  */
-function processFindAndFormat(docXml: string, find: string, replace: string | null, formatProps: Record<string, string>, useRegex: boolean): { docXml: string; matchCount: number } {
+function processFindAndFormat(
+  docXml: string,
+  find: string,
+  replace: string | null,
+  formatProps: Record<string, string>,
+  useRegex: boolean
+): { docXml: string; matchCount: number } {
   let result = docXml;
   let matchCount = 0;
 
+  if (!find) {
+    return { docXml: result, matchCount: 0 };
+  }
+
+  // Build regex pattern
+  let pattern: RegExp;
   if (useRegex) {
     const flags = "g" + (find.includes("i") ? "i" : "");
-    const pattern = find.startsWith("r\"") && find.endsWith("\"")
+    const rawPattern = find.startsWith("r\"") && find.endsWith("\"")
       ? find.slice(2, -1)
       : find;
-    const regex = new RegExp(pattern, flags);
-
-    if (replace !== null && replace !== undefined) {
-      result = result.replace(regex, replace);
+    try {
+      pattern = new RegExp(rawPattern, flags);
+    } catch {
+      // Invalid regex, treat as literal
+      pattern = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
     }
   } else {
-    // Simple text search
-    let searchStr = find;
-    let idx = result.indexOf(searchStr);
-    while (idx !== -1) {
-      matchCount++;
-      if (replace !== null && replace !== undefined) {
-        result = result.slice(0, idx) + replace + result.slice(idx + searchStr.length);
-        idx = result.indexOf(searchStr, idx + replace.length);
+    pattern = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g");
+  }
+
+  // Helper to generate rPr XML from format props
+  function buildRprXml(props: Record<string, string>): string {
+    const tags: string[] = [];
+
+    if (props.bold) {
+      tags.push("<w:b/>");
+    }
+    if (props.italic) {
+      tags.push("<w:i/>");
+    }
+    if (props.underline) {
+      const ulVal = props.underline === true || props.underline === "true" ? "single" : props.underline;
+      tags.push(`<w:u w:val="${ulVal}"/>`);
+    }
+    if (props.strike) {
+      tags.push("<w:strike/>");
+    }
+    if (props.color) {
+      tags.push(`<w:color w:val="${sanitizeHex(props.color)}"/>`);
+    }
+    if (props.highlight) {
+      tags.push(`<w:highlight w:val="${props.highlight}"/>`);
+    }
+    if (props.font) {
+      tags.push(`<w:rFonts w:ascii="${escapeXml(props.font)}" w:hAnsi="${escapeXml(props.font)}" w:eastAsia="${escapeXml(props.font)}"/>`);
+    }
+    if (props.size) {
+      const sizeVal = parseInt(props.size, 10) * 2;
+      tags.push(`<w:sz w:val="${sizeVal}"/><w:szCs w:val="${sizeVal}"/>`);
+    }
+    if (props.shading || props.shd) {
+      const shdVal = props.shading || props.shd;
+      const parts = shdVal.split(";");
+      if (parts.length === 1) {
+        tags.push(`<w:shd w:val="clear" w:fill="${sanitizeHex(parts[0])}"/>`);
       } else {
-        idx = result.indexOf(searchStr, idx + 1);
+        tags.push(`<w:shd w:val="${parts[0]}" w:fill="${sanitizeHex(parts[1])}" w:color="${parts.length > 2 ? sanitizeHex(parts[2]) : "auto"}"/>`);
+      }
+    }
+    if (props.subscript) {
+      tags.push(`<w:vertAlign w:val="subscript"/>`);
+    }
+    if (props.superscript) {
+      tags.push(`<w:vertAlign w:val="superscript"/>`);
+    }
+    if (props.caps) {
+      tags.push("<w:caps/>");
+    }
+    if (props.smallcaps) {
+      tags.push("<w:smallCaps/>");
+    }
+    if (props.vanish) {
+      tags.push("<w:vanish/>");
+    }
+    if (props.charspacing || props.spacing || props.letterspacing) {
+      const val = props.charspacing || props.spacing || props.letterspacing;
+      const numVal = val.endsWith("pt")
+        ? Math.round(parseFloat(val.slice(0, -2)) * 20)
+        : Math.round(parseFloat(val) * 20);
+      tags.push(`<w:spacing w:val="${numVal}"/>`);
+    }
+
+    return tags.length > 0 ? `<w:rPr>${tags.join("")}</w:rPr>` : "";
+  }
+
+  // Process document paragraph by paragraph
+  const paraRegex = /<w:p[\s\S]*?<\/w:p>/g;
+  let paraMatch;
+
+  while ((paraMatch = paraRegex.exec(result)) !== null) {
+    const paraStart = paraMatch.index;
+    const paraXml = paraMatch[0];
+
+    // Parse runs in this paragraph to build text positions
+    interface RunInfo {
+      runXml: string;
+      text: string;
+      start: number;
+      end: number;
+      runStart: number;
+      runEnd: number;
+    }
+
+    const runs: RunInfo[] = [];
+    const runRegex = /<w:r[\s\S]*?<\/w:r>/g;
+    let runMatch;
+    let textPos = 0;
+
+    while ((runMatch = runRegex.exec(paraXml)) !== null) {
+      const runXml = runMatch[0];
+      const runStartPos = runMatch.index;
+
+      // Extract text content from this run
+      const textMatches: string[] = [];
+      const textRegex = /<w:t[^>]*>([\s\S]*?)<\/w:t>/g;
+      let textMatch;
+      while ((textMatch = textRegex.exec(runXml)) !== null) {
+        textMatches.push(textMatch[1]);
+      }
+      const runText = textMatches.join("");
+
+      // Find end of run element
+      const runEndPos = runXml.length + runStartPos;
+
+      runs.push({
+        runXml,
+        text: runText,
+        start: textPos,
+        end: textPos + runText.length,
+        runStart: runStartPos,
+        runEnd: runEndPos
+      });
+
+      textPos += runText.length;
+    }
+
+    if (runs.length === 0) continue;
+
+    const fullText = runs.map(r => r.text).join("");
+
+    // Find all matches in this paragraph
+    const matches: Array<{ start: number; end: number; length: number }> = [];
+    let regexMatch;
+    const re = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : pattern.flags + "g");
+    while ((regexMatch = re.exec(fullText)) !== null) {
+      matches.push({
+        start: regexMatch.index,
+        end: regexMatch.index + regexMatch[0].length,
+        length: regexMatch[0].length
+      });
+      if (!pattern.global) break;
+    }
+
+    if (matches.length === 0) continue;
+
+    matchCount += matches.length;
+
+    // Process matches from end to start to preserve offsets
+    for (let i = matches.length - 1; i >= 0; i--) {
+      const m = matches[i];
+
+      // Find which runs are affected by this match
+      const affectedRuns: RunInfo[] = [];
+      for (const run of runs) {
+        if (run.end > m.start && run.start < m.end) {
+          affectedRuns.push(run);
+        }
+      }
+
+      if (affectedRuns.length === 0) continue;
+
+      // Sort affected runs by their start position
+      affectedRuns.sort((a, b) => a.start - b.start);
+
+      // Get the original match text
+      const matchText = fullText.slice(m.start, m.end);
+
+      // Step 1: Handle replacement if provided
+      if (replace !== null && replace !== undefined) {
+        const firstRun = affectedRuns[0];
+        const lastRun = affectedRuns[affectedRuns.length - 1];
+
+        // Build text before, match, and after
+        const textBefore = fullText.slice(0, m.start);
+        const textAfter = fullText.slice(m.end);
+        const textMatched = fullText.slice(m.start, m.end);
+
+        // Determine replacement text
+        const replacement = replace;
+
+        // Build new run content
+        let newRunContent = "";
+
+        const firstRunStartOffset = m.start - firstRun.start;
+        const lastRunEndOffset = m.end - lastRun.start;
+
+        // Text in runs before the match
+        if (textBefore) {
+          const beforeRuns = runs.filter(r => r.end <= m.start);
+          if (beforeRuns.length > 0) {
+            const beforeText = firstRun.text.slice(0, firstRunStartOffset);
+            if (beforeText) {
+              newRunContent += `<w:r><w:t xml:space="preserve">${escapeXml(beforeText)}</w:t></w:r>`;
+            }
+          }
+        }
+
+        // Replacement text (potentially with formatting)
+        const hasFormatProps = formatProps && Object.keys(formatProps).length > 0;
+        const rprXml = hasFormatProps ? buildRprXml(formatProps) : "";
+        newRunContent += `<w:r>${rprXml}<w:t xml:space="preserve">${escapeXml(replacement)}</w:t></w:r>`;
+
+        // Text after match
+        if (textAfter) {
+          const afterText = lastRun.text.slice(lastRunEndOffset);
+          if (afterText) {
+            newRunContent += `<w:r><w:t xml:space="preserve">${escapeXml(afterText)}</w:t></w:r>`;
+          }
+        }
+
+        // Find the position range in paraXml to replace
+        const runStartInDoc = paraStart + firstRun.runStart;
+        const runEndInDoc = paraStart + lastRun.runEnd;
+
+        // Do the replacement in result
+        result = result.slice(0, runStartInDoc) + newRunContent + result.slice(runEndInDoc);
+
+        // Update run positions for subsequent matches in this paragraph
+        const xmlDiff = newRunContent.length - (lastRun.runEnd - firstRun.runStart);
+        for (const run of runs) {
+          if (run.runStart >= firstRun.runStart) {
+            run.runStart += xmlDiff;
+            run.runEnd += xmlDiff;
+          }
+        }
+      } else if (formatProps && Object.keys(formatProps).length > 0) {
+        // No replacement, only formatting - wrap the matched text in formatted runs
+
+        const firstRun = affectedRuns[0];
+        const lastRun = affectedRuns[affectedRuns.length - 1];
+
+        const rprXml = buildRprXml(formatProps);
+
+        // Get text portions
+        const firstRunStartOffset = m.start - firstRun.start;
+        const lastRunEndOffset = m.end - lastRun.start;
+
+        const textBefore = firstRun.text.slice(0, firstRunStartOffset);
+        const textMatched = fullText.slice(m.start, m.end);
+        const textAfter = lastRun.text.slice(lastRunEndOffset);
+
+        // Build new run content
+        let newRunContent = "";
+
+        if (textBefore) {
+          newRunContent += `<w:r><w:t xml:space="preserve">${escapeXml(textBefore)}</w:t></w:r>`;
+        }
+
+        newRunContent += `<w:r>${rprXml}<w:t xml:space="preserve">${escapeXml(textMatched)}</w:t></w:r>`;
+
+        if (textAfter) {
+          newRunContent += `<w:r><w:t xml:space="preserve">${escapeXml(textAfter)}</w:t></w:r>`;
+        }
+
+        // Find the position range in paraXml to replace
+        const runStartInDoc = paraStart + firstRun.runStart;
+        const runEndInDoc = paraStart + lastRun.runEnd;
+
+        // Do the replacement in result
+        result = result.slice(0, runStartInDoc) + newRunContent + result.slice(runEndInDoc);
+
+        // Update run positions for subsequent matches
+        const xmlDiff = newRunContent.length - (lastRun.runEnd - firstRun.runStart);
+        for (const run of runs) {
+          if (run.runStart >= firstRun.runStart) {
+            run.runStart += xmlDiff;
+            run.runEnd += xmlDiff;
+          }
+        }
       }
     }
   }
@@ -2579,7 +2848,7 @@ function addNewStyle(stylesXml: string, styleName: string, properties: WordStyle
 }
 
 function updateExistingStyle(stylesXml: string, styleId: string, properties: WordStyleProperties): string {
-  const styleRegex = new RegExp(`<w:style\\b[^>]*\\s+w:styleId=["']${escapeRegex(styleId)}["'][^>]*>[\\s\\S]*?<\\/w:style>`, "i");
+  const styleRegex = new RegExp(`<w:style\\b[^>]*\\s+w:styleId=["']${escapeRegex(styleId)}["'][^>]*>[\s\S]*?<\/w:style>`, "i");
   const match = styleRegex.exec(stylesXml);
 
   if (!match) {
@@ -3098,7 +3367,7 @@ function updateCompatibilitySettings(settingsXml: string, props: WordCompatibili
 // ============================================================================
 
 function getStyleNameFromId(stylesXml: string, styleId: string): string | null {
-  const regex = new RegExp(`<w:style\\b[^>]*\\s+w:styleId=["']${escapeRegex(styleId)}["'][^>]*>[\\s\\S]*?<w:name\\s+w:val=["']([^"']+)["']`, "i");
+  const regex = new RegExp(`<w:style\\b[^>]*\\s+w:styleId=["']${escapeRegex(styleId)}["'][^>]*>[\s\S]*?<w:name\\s+w:val=["']([^"']+)["']`, "i");
   const match = regex.exec(stylesXml);
   return match ? match[1] : null;
 }
@@ -3151,7 +3420,7 @@ function getRunsInfo(xml: string, paraIndex: number): RunInfo[] {
 
       const runInfo: RunInfo = { text };
 
-      const rPrMatch = /<w:rPr>([\\s\\S]*?)<\/w:rPr>/i.exec(runXml);
+      const rPrMatch = /<w:rPr>([\s\S]*?)<\/w:rPr>/i.exec(runXml);
       if (rPrMatch) {
         const rPrContent = rPrMatch[1];
 
