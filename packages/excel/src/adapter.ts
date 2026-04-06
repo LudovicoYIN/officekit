@@ -3632,7 +3632,7 @@ function evaluateRoundFormula(
 }
 
 function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, expression: string, sheet: ExcelSheetModel) {
-  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT)\((.*)\)$/i.exec(expression);
+  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE)\((.*)\)$/i.exec(expression);
   if (!direct) return undefined;
   const fn = direct[1].toUpperCase();
   const args = splitFormulaArgs(direct[2]);
@@ -3702,6 +3702,27 @@ function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, ex
   }
   if (fn === "EXACT") {
     return (resolveText(args[0] ?? "") === resolveText(args[1] ?? "")) ? "TRUE" : "FALSE";
+  }
+  if (fn === "PROPER") {
+    const text = resolveText(args[0] ?? "");
+    return text.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+  }
+  if (fn === "CLEAN") {
+    const text = resolveText(args[0] ?? "");
+    return text.replace(/[\x00-\x1F]/g, "");
+  }
+  if (fn === "REPT") {
+    const text = resolveText(args[0] ?? "");
+    const count = Math.max(0, Number(firstNumericFormulaArg(state, args[1] ?? "0", sheet, new Set()) ?? 0));
+    return text.repeat(Math.round(count));
+  }
+  if (fn === "CHAR") {
+    const code = firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0;
+    return String.fromCharCode(Math.round(code));
+  }
+  if (fn === "CODE") {
+    const text = resolveText(args[0] ?? "");
+    return String(text.length > 0 ? text.charCodeAt(0) : 0);
   }
   return undefined;
 }
