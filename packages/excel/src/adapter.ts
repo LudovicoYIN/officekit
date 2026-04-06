@@ -3619,7 +3619,7 @@ function evaluateFormulaExpression(
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|GEOMEAN|HARMEAN|PERCENTRANK|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ISLOGICAL|ISNONTEXT|TYPE|NA|ERROR_TYPE|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|SLN|SYD|DB|DDB|STDEV|STDEVP|VAR|VARP|STDEV_S|STDEV_P|VAR_S|VAR_P|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ATAN|ATAN2|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND|MODE_SNGL|RANK_EQ|PERCENTILE_INC|BIN2DEC|HEX2DEC|OCT2DEC|SWITCH)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|MODE|LARGE|SMALL|GEOMEAN|HARMEAN|PERCENTRANK|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ISLOGICAL|ISNONTEXT|TYPE|NA|ERROR_TYPE|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|SLN|SYD|DB|DDB|STDEV|STDEVP|VAR|VARP|STDEV_S|STDEV_P|VAR_S|VAR_P|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ATAN|ATAN2|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND|MODE_SNGL|RANK_EQ|PERCENTILE_INC|BIN2DEC|HEX2DEC|OCT2DEC|SWITCH|ROMAN|ARABIC)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -3770,7 +3770,7 @@ function evaluateRoundFormula(
 }
 
 function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, expression: string, sheet: ExcelSheetModel) {
-  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE|TEXT|FIXED|NUMBERVALUE|DOLLAR|YEN|T|N|DEC2BIN|DEC2HEX|DEC2OCT|BIN2HEX|BIN2OCT|HEX2BIN|HEX2OCT|OCT2BIN|OCT2HEX|SWITCH)\((.*)\)$/i.exec(expression);
+  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE|TEXT|FIXED|NUMBERVALUE|DOLLAR|YEN|T|N|DEC2BIN|DEC2HEX|DEC2OCT|BIN2HEX|BIN2OCT|HEX2BIN|HEX2OCT|OCT2BIN|OCT2HEX|SWITCH|ADDRESS)\((.*)\)$/i.exec(expression);
   if (!direct) return undefined;
   const fn = direct[1].toUpperCase();
   const args = splitFormulaArgs(direct[2]);
@@ -3904,6 +3904,7 @@ function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, ex
   if (fn === "HEX2OCT") { const val = resolveText(args[0] ?? ""); const n = parseInt(val, 16); if (!Number.isFinite(n)) return undefined; const places = args[1] !== undefined ? Math.round(firstNumericFormulaArg(state, args[1], sheet, new Set()) ?? 0) : 0; let s = n.toString(8); if (places > 0) s = s.padStart(places, '0'); return s; }
   if (fn === "OCT2BIN") { const val = resolveText(args[0] ?? ""); const n = parseInt(val, 8); if (!Number.isFinite(n)) return undefined; const places = args[1] !== undefined ? Math.round(firstNumericFormulaArg(state, args[1], sheet, new Set()) ?? 0) : 0; let s = n.toString(2); if (places > 0) s = s.padStart(places, '0'); return s; }
   if (fn === "OCT2HEX") { const val = resolveText(args[0] ?? ""); const n = parseInt(val, 8); if (!Number.isFinite(n)) return undefined; const places = args[1] !== undefined ? Math.round(firstNumericFormulaArg(state, args[1], sheet, new Set()) ?? 0) : 0; let s = n.toString(16).toUpperCase(); if (places > 0) s = s.padStart(places, '0'); return s; }
+  if (fn === "ADDRESS") { const row = Math.round(firstNumericFormulaArg(state, args[0] ?? "1", sheet, new Set()) ?? 1); const col = Math.round(firstNumericFormulaArg(state, args[1] ?? "1", sheet, new Set()) ?? 1); const absNum = args[2] !== undefined ? Math.round(firstNumericFormulaArg(state, args[2], sheet, new Set()) ?? 1) : 1; const a1Style = args[3] === undefined || firstNumericFormulaArg(state, args[3], sheet, new Set()) !== 0; const sheetText = args[4] !== undefined ? resolveText(args[4]) : ""; const colStr = (() => { let c = ""; let n = col; while (n > 0) { c = String.fromCharCode(64 + (n % 26 || 26)) + c; n = Math.floor((n - 1) / 26); } return c; })(); const rowStr = String(row); if (!a1Style) return (sheetText ? sheetText + "!" : "") + "R" + rowStr + "C" + col; const absCol = absNum === 1 || absNum === 2 ? "$" + colStr : colStr; const absRow = absNum === 1 || absNum === 3 ? "$" + rowStr : rowStr; return (sheetText ? sheetText + "!" : "") + absCol + absRow; }
   return undefined;
 }
 
