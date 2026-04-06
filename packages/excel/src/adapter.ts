@@ -71,7 +71,7 @@ export interface ExcelCommentModel {
 
 interface ExcelConditionalFormattingModel {
   sqref: string;
-  cfType: "databar" | "colorscale" | "iconset";
+  cfType: "databar" | "colorscale" | "iconset" | "formula" | "topn" | "aboveaverage" | "uniquevalues" | "duplicatevalues" | "containstext" | "dateoccurring";
   priority?: number;
   color?: string;
   min?: string;
@@ -82,6 +82,17 @@ interface ExcelConditionalFormattingModel {
   iconset?: string;
   reverse?: boolean;
   showvalue?: boolean;
+  formula?: string;
+  dxfId?: number;
+  fontColor?: string;
+  fontBold?: boolean;
+  fill?: string;
+  rank?: number;
+  percent?: boolean;
+  bottom?: boolean;
+  above?: boolean;
+  text?: string;
+  period?: string;
 }
 
 export interface ExcelTableModel {
@@ -276,9 +287,9 @@ export async function addExcelNode(filePath: string, targetPath: string, options
     return { ...validation, ...(validation.type ? { validationType: validation.type } : {}), path: `/${sheet.name}/validation[${validations.length}]`, type: "validation" };
   }
 
-  if (options.type === "cf" || options.type === "conditionalformatting" || options.type === "databar" || options.type === "colorscale" || options.type === "iconset") {
+  if (options.type === "cf" || options.type === "conditionalformatting" || options.type === "databar" || options.type === "colorscale" || options.type === "iconset" || options.type === "formulacf" || options.type === "topn" || options.type === "aboveaverage" || options.type === "uniquevalues" || options.type === "duplicatevalues" || options.type === "containstext" || options.type === "dateoccurring") {
     const sheet = ensureSheetState(state, normalizeSheetPath(targetPath));
-    const cf = addConditionalFormatting(sheet, options.type, options.props);
+    const cf = addConditionalFormatting(state, sheet, options.type, options.props);
     await writeWorkbookState(filePath, state);
     return { ...cf, path: `/${sheet.name}/cf[${parseConditionalFormatting(sheet.xml).length}]`, type: "conditionalformatting" };
   }
@@ -508,7 +519,7 @@ export async function setExcelNode(filePath: string, targetPath: string, options
   const cfMatch = /^\/([^/]+)\/cf\[(\d+)\]$/i.exec(targetPath);
   if (cfMatch) {
     const sheet = ensureSheetState(state, cfMatch[1]);
-    const next = setConditionalFormatting(sheet, Number(cfMatch[2]), options.props);
+    const next = setConditionalFormatting(state, sheet, Number(cfMatch[2]), options.props);
     await writeWorkbookState(filePath, state);
     return { ...next, path: targetPath, type: "conditionalformatting" };
   }
@@ -1665,13 +1676,14 @@ function addValidation(sheet: ExcelSheetModel, props: Record<string, string>) {
   return validation;
 }
 
-function addConditionalFormatting(sheet: ExcelSheetModel, requestedType: string, props: Record<string, string>) {
+function addConditionalFormatting(state: ExcelWorkbookState, sheet: ExcelSheetModel, requestedType: string, props: Record<string, string>) {
   const normalizedType = requestedType.toLowerCase() === "cf" || requestedType.toLowerCase() === "conditionalformatting"
     ? (props.type ?? "databar").toLowerCase()
     : requestedType.toLowerCase();
   const sqref = props.sqref ?? props.range ?? props.ref ?? "A1:A10";
   const rules = parseConditionalFormatting(sheet.xml);
   const priority = rules.length + 1;
+  const dxfId = hasConditionalFormattingStyleProps(props) ? registerDifferentialFormat(state, props) : undefined;
   let next: ExcelConditionalFormattingModel;
   if (normalizedType === "databar") {
     next = {
@@ -1681,6 +1693,7 @@ function addConditionalFormatting(sheet: ExcelSheetModel, requestedType: string,
       ...(props.color ? { color: normalizeArgbColor(props.color) } : { color: "FF638EC6" }),
       ...(props.min !== undefined ? { min: props.min } : {}),
       ...(props.max !== undefined ? { max: props.max } : {}),
+      ...(dxfId !== undefined ? { dxfId } : {}),
     };
   } else if (normalizedType === "colorscale") {
     next = {
@@ -1690,6 +1703,7 @@ function addConditionalFormatting(sheet: ExcelSheetModel, requestedType: string,
       minColor: normalizeArgbColor(props.mincolor ?? "FFF8696B"),
       ...(props.midcolor ? { midColor: normalizeArgbColor(props.midcolor) } : {}),
       maxColor: normalizeArgbColor(props.maxcolor ?? "FF63BE7B"),
+      ...(dxfId !== undefined ? { dxfId } : {}),
     };
   } else if (normalizedType === "iconset") {
     next = {
@@ -1699,22 +1713,97 @@ function addConditionalFormatting(sheet: ExcelSheetModel, requestedType: string,
       iconset: props.iconset ?? props.icons ?? "3TrafficLights1",
       ...(props.reverse !== undefined ? { reverse: isTruthy(props.reverse) } : {}),
       ...(props.showvalue !== undefined ? { showvalue: isTruthy(props.showvalue) } : {}),
+      ...(dxfId !== undefined ? { dxfId } : {}),
+    };
+  } else if (normalizedType === "formulacf" || normalizedType === "formula") {
+    if (!props.formula) {
+      throw new UsageError("Formula-based conditional formatting requires --prop formula=...");
+    }
+    next = {
+      sqref,
+      cfType: "formula",
+      priority,
+      formula: props.formula,
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "topn" || normalizedType === "top10") {
+    next = {
+      sqref,
+      cfType: "topn",
+      priority,
+      rank: Number(props.rank ?? "10"),
+      ...(props.percent !== undefined ? { percent: isTruthy(props.percent) } : {}),
+      ...(props.bottom !== undefined ? { bottom: isTruthy(props.bottom) } : {}),
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "aboveaverage") {
+    next = {
+      sqref,
+      cfType: "aboveaverage",
+      priority,
+      ...(props.above !== undefined ? { above: isTruthy(props.above) } : { above: true }),
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "uniquevalues") {
+    next = {
+      sqref,
+      cfType: "uniquevalues",
+      priority,
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "duplicatevalues") {
+    next = {
+      sqref,
+      cfType: "duplicatevalues",
+      priority,
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "containstext") {
+    if (!props.text) {
+      throw new UsageError("ContainsText conditional formatting requires --prop text=...");
+    }
+    next = {
+      sqref,
+      cfType: "containstext",
+      priority,
+      text: props.text,
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
+    };
+  } else if (normalizedType === "dateoccurring" || normalizedType === "timeperiod") {
+    next = {
+      sqref,
+      cfType: "dateoccurring",
+      priority,
+      period: normalizeTimePeriod(props.period ?? "today"),
+      ...(dxfId !== undefined ? { dxfId } : {}),
+      ...extractConditionalFormattingStyleProps(props),
     };
   } else {
-    throw new UsageError(`Unsupported conditional formatting type '${requestedType}'.`, "Use databar, colorscale, iconset, or cf --prop type=...");
+    throw new UsageError(`Unsupported conditional formatting type '${requestedType}'.`, "Use databar, colorscale, iconset, formulacf, topn, aboveaverage, uniquevalues, duplicatevalues, containstext, dateoccurring, or cf --prop type=...");
   }
   rules.push(next);
   sheet.xml = replaceSheetConditionalFormatting(sheet.xml, rules);
   return next;
 }
 
-function setConditionalFormatting(sheet: ExcelSheetModel, index: number, props: Record<string, string>) {
+function setConditionalFormatting(state: ExcelWorkbookState, sheet: ExcelSheetModel, index: number, props: Record<string, string>) {
   const rules = parseConditionalFormatting(sheet.xml);
   const current = rules[index - 1];
   if (!current) {
     throw new OfficekitError(`Conditional formatting ${index} does not exist.`, "not_found");
   }
   const next: ExcelConditionalFormattingModel = { ...current };
+  const dxfRelevantProps = Object.fromEntries(Object.entries(props).filter(([key]) => isConditionalFormattingStyleKey(key)));
+  if (Object.keys(dxfRelevantProps).length > 0) {
+    next.dxfId = registerDifferentialFormat(state, { ...serializeConditionalFormattingStyleProps(current), ...dxfRelevantProps });
+    Object.assign(next, extractConditionalFormattingStyleProps({ ...serializeConditionalFormattingStyleProps(current), ...dxfRelevantProps }));
+  }
   for (const [key, value] of Object.entries(props)) {
     switch (key.toLowerCase()) {
       case "sqref":
@@ -1744,8 +1833,33 @@ function setConditionalFormatting(sheet: ExcelSheetModel, index: number, props: 
       case "showvalue":
         next.showvalue = isTruthy(value);
         break;
+      case "formula":
+        next.formula = value;
+        break;
+      case "rank":
+        next.rank = Number(value);
+        break;
+      case "percent":
+        next.percent = isTruthy(value);
+        break;
+      case "bottom":
+        next.bottom = isTruthy(value);
+        break;
+      case "above":
+        next.above = isTruthy(value);
+        break;
+      case "text":
+        next.text = value;
+        break;
+      case "period":
+        next.period = normalizeTimePeriod(value);
+        break;
+      case "font.color":
+      case "font.bold":
+      case "fill":
+        break;
       default:
-        throw new UsageError(`Unsupported conditional formatting property '${key}'.`, "Supported: sqref/range/ref, color, mincolor, midcolor, maxcolor, iconset/icons, reverse, showvalue.");
+        throw new UsageError(`Unsupported conditional formatting property '${key}'.`, "Supported: sqref/range/ref, color, mincolor, midcolor, maxcolor, iconset/icons, reverse, showvalue, formula, rank, percent, bottom, above, text, period, font.color, font.bold, fill.");
     }
   }
   rules[index - 1] = next;
@@ -2611,12 +2725,16 @@ function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattin
       const attrs = ruleMatch[1];
       const ruleBody = ruleMatch[2];
       const type = (parseAttr(attrs, "type") ?? "").toLowerCase();
-      if (type === "databar" || type === "databar".toLowerCase()) {
+      const common = {
+        sqref,
+        ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
+        ...(parseAttr(attrs, "dxfId") ? { dxfId: Number(parseAttr(attrs, "dxfId")) } : {}),
+      };
+      if (type === "databar") {
         const cfvo = [...ruleBody.matchAll(/<(?:\w+:)?cfvo\b([^>]*)\/?>/g)].map((item) => ({ type: parseAttr(item[1], "type"), val: parseAttr(item[1], "val") }));
         return {
-          sqref,
+          ...common,
           cfType: "databar" as const,
-          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
           ...(cfvo[0]?.type === "num" && cfvo[0]?.val ? { min: cfvo[0].val } : {}),
           ...(cfvo[1]?.type === "num" && cfvo[1]?.val ? { max: cfvo[1].val } : {}),
           ...(parseAttr(/<(?:\w+:)?color\b([^>]*)\/?>/.exec(ruleBody)?.[1] ?? "", "rgb") ? { color: parseAttr(/<(?:\w+:)?color\b([^>]*)\/?>/.exec(ruleBody)?.[1] ?? "", "rgb") } : {}),
@@ -2625,9 +2743,8 @@ function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattin
       if (type === "colorscale") {
         const colors = [...ruleBody.matchAll(/<(?:\w+:)?color\b([^>]*)\/?>/g)].map((item) => parseAttr(item[1], "rgb")).filter(Boolean) as string[];
         return {
-          sqref,
+          ...common,
           cfType: "colorscale" as const,
-          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
           ...(colors[0] ? { minColor: colors[0] } : {}),
           ...(colors[1] && colors.length === 3 ? { midColor: colors[1] } : {}),
           ...(colors.at(-1) ? { maxColor: colors.at(-1)! } : {}),
@@ -2636,16 +2753,59 @@ function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattin
       if (type === "iconset") {
         const iconAttrs = /<(?:\w+:)?iconSet\b([^>]*)>/.exec(ruleBody)?.[1] ?? "";
         return {
-          sqref,
+          ...common,
           cfType: "iconset" as const,
-          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
           ...(parseAttr(iconAttrs, "iconSet") ? { iconset: parseAttr(iconAttrs, "iconSet") } : {}),
           ...(parseAttr(iconAttrs, "reverse") !== undefined ? { reverse: isTruthy(parseAttr(iconAttrs, "reverse") ?? "false") } : {}),
           ...(parseAttr(iconAttrs, "showValue") !== undefined ? { showvalue: isTruthy(parseAttr(iconAttrs, "showValue") ?? "false") } : {}),
         };
       }
+      if (type === "expression") {
+        return {
+          ...common,
+          cfType: "formula" as const,
+          ...(extractTagText(ruleBody, "formula") ? { formula: extractTagText(ruleBody, "formula") } : {}),
+        };
+      }
+      if (type === "top10") {
+        return {
+          ...common,
+          cfType: "topn" as const,
+          ...(parseAttr(attrs, "rank") ? { rank: Number(parseAttr(attrs, "rank")) } : {}),
+          ...(parseAttr(attrs, "percent") !== undefined ? { percent: isTruthy(parseAttr(attrs, "percent") ?? "false") } : {}),
+          ...(parseAttr(attrs, "bottom") !== undefined ? { bottom: isTruthy(parseAttr(attrs, "bottom") ?? "false") } : {}),
+        };
+      }
+      if (type === "aboveaverage") {
+        return {
+          ...common,
+          cfType: "aboveaverage" as const,
+          ...(parseAttr(attrs, "aboveAverage") !== undefined ? { above: isTruthy(parseAttr(attrs, "aboveAverage") ?? "false") } : { above: true }),
+        };
+      }
+      if (type === "uniquevalues") {
+        return { ...common, cfType: "uniquevalues" as const };
+      }
+      if (type === "duplicatevalues") {
+        return { ...common, cfType: "duplicatevalues" as const };
+      }
+      if (type === "containstext") {
+        return {
+          ...common,
+          cfType: "containstext" as const,
+          ...(parseAttr(attrs, "text") ? { text: parseAttr(attrs, "text") } : {}),
+          ...(extractTagText(ruleBody, "formula") ? { formula: extractTagText(ruleBody, "formula") } : {}),
+        };
+      }
+      if (type === "timeperiod") {
+        return {
+          ...common,
+          cfType: "dateoccurring" as const,
+          ...(parseAttr(attrs, "timePeriod") ? { period: parseAttr(attrs, "timePeriod") } : {}),
+        };
+      }
       return {
-        sqref,
+        ...common,
         cfType: "databar" as const,
       };
     }).filter((item) => item.sqref);
@@ -2663,12 +2823,35 @@ function replaceSheetConditionalFormatting(sheetXml: string, rules: ExcelConditi
 function renderConditionalFormattingXml(rule: ExcelConditionalFormattingModel, index: number) {
   const priority = rule.priority ?? index + 1;
   if (rule.cfType === "databar") {
-    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="dataBar" priority="${priority}"><dataBar><cfvo type="${rule.min !== undefined ? "num" : "min"}"${rule.min !== undefined ? ` val="${escapeXml(rule.min)}"` : ""}/><cfvo type="${rule.max !== undefined ? "num" : "max"}"${rule.max !== undefined ? ` val="${escapeXml(rule.max)}"` : ""}/><color rgb="${escapeXml(rule.color ?? "FF638EC6")}"/></dataBar></cfRule></conditionalFormatting>`;
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="dataBar" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}><dataBar><cfvo type="${rule.min !== undefined ? "num" : "min"}"${rule.min !== undefined ? ` val="${escapeXml(rule.min)}"` : ""}/><cfvo type="${rule.max !== undefined ? "num" : "max"}"${rule.max !== undefined ? ` val="${escapeXml(rule.max)}"` : ""}/><color rgb="${escapeXml(rule.color ?? "FF638EC6")}"/></dataBar></cfRule></conditionalFormatting>`;
   }
   if (rule.cfType === "colorscale") {
     const mid = rule.midColor ? `<cfvo type="percentile" val="50"/><color rgb="${escapeXml(rule.midColor)}"/>` : "";
-    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="colorScale" priority="${priority}"><colorScale><cfvo type="min"/><cfvo type="max"/>${mid ? "" : ""}<color rgb="${escapeXml(rule.minColor ?? "FFF8696B")}"/>${mid}<color rgb="${escapeXml(rule.maxColor ?? "FF63BE7B")}"/></colorScale></cfRule></conditionalFormatting>`
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="colorScale" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}><colorScale><cfvo type="min"/><cfvo type="max"/>${mid ? "" : ""}<color rgb="${escapeXml(rule.minColor ?? "FFF8696B")}"/>${mid}<color rgb="${escapeXml(rule.maxColor ?? "FF63BE7B")}"/></colorScale></cfRule></conditionalFormatting>`
       .replace("<cfvo type=\"min\"/><cfvo type=\"max\"/>", rule.midColor ? `<cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/>` : `<cfvo type="min"/><cfvo type="max"/>`);
+  }
+  if (rule.cfType === "formula") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="expression" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}><formula>${escapeXml(rule.formula ?? "")}</formula></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "topn") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="top10" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}${rule.rank !== undefined ? ` rank="${rule.rank}"` : ""}${rule.percent ? ' percent="1"' : ""}${rule.bottom ? ' bottom="1"' : ""}></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "aboveaverage") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="aboveAverage" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}${rule.above === false ? ' aboveAverage="0"' : ""}></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "uniquevalues") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="uniqueValues" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "duplicatevalues") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="duplicateValues" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "containstext") {
+    const firstCell = rule.sqref.split(":")[0].replace(/\$/g, "");
+    const formula = rule.formula ?? `NOT(ISERROR(SEARCH("${rule.text ?? ""}",${firstCell})))`;
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="containsText" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}${rule.text ? ` text="${escapeXml(rule.text)}"` : ""} operator="containsText"><formula>${escapeXml(formula)}</formula></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "dateoccurring") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="timePeriod" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}${rule.period ? ` timePeriod="${escapeXml(normalizeTimePeriod(rule.period))}"` : ""}></cfRule></conditionalFormatting>`;
   }
   const iconSetName = rule.iconset ?? "3TrafficLights1";
   const iconCount = getIconSetThresholdCount(iconSetName);
@@ -2676,7 +2859,90 @@ function renderConditionalFormattingXml(rule: ExcelConditionalFormattingModel, i
     const value = itemIndex === 0 ? "0" : String(Math.floor(itemIndex * 100 / iconCount));
     return `<cfvo type="percent" val="${value}"/>`;
   }).join("");
-  return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="iconSet" priority="${priority}"><iconSet iconSet="${escapeXml(iconSetName)}"${rule.reverse ? ' reverse="1"' : ""}${rule.showvalue !== undefined ? ` showValue="${rule.showvalue ? 1 : 0}"` : ""}>${thresholdXml}</iconSet></cfRule></conditionalFormatting>`;
+  return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="iconSet" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}><iconSet iconSet="${escapeXml(iconSetName)}"${rule.reverse ? ' reverse="1"' : ""}${rule.showvalue !== undefined ? ` showValue="${rule.showvalue ? 1 : 0}"` : ""}>${thresholdXml}</iconSet></cfRule></conditionalFormatting>`;
+}
+
+function isConditionalFormattingStyleKey(key: string) {
+  const lower = key.toLowerCase();
+  return lower === "fontcolor"
+    || lower === "fill"
+    || lower === "fontbold"
+    || lower === "bold"
+    || lower === "color";
+}
+
+function hasConditionalFormattingStyleProps(props: Record<string, string>) {
+  return Object.keys(props).some((key) => isConditionalFormattingStyleKey(key));
+}
+
+function extractConditionalFormattingStyleProps(props: Record<string, string>) {
+  return {
+    ...(props.fontColor ?? props.fontcolor ? { fontColor: normalizeArgbColor(props.fontColor ?? props.fontcolor ?? "") } : {}),
+    ...(props.fill ? { fill: normalizeArgbColor(props.fill) } : {}),
+    ...(props.fontBold !== undefined || props.fontbold !== undefined || props.bold !== undefined
+      ? { fontBold: isTruthy(props.fontBold ?? props.fontbold ?? props.bold ?? "false") }
+      : {}),
+  };
+}
+
+function serializeConditionalFormattingStyleProps(rule: ExcelConditionalFormattingModel): Record<string, string> {
+  return {
+    ...(rule.fontColor ? { fontColor: rule.fontColor } : {}),
+    ...(rule.fill ? { fill: rule.fill } : {}),
+    ...(rule.fontBold !== undefined ? { fontBold: String(rule.fontBold) } : {}),
+  };
+}
+
+function registerDifferentialFormat(state: ExcelWorkbookState, props: Record<string, string>) {
+  const dxfXml = renderDifferentialFormatXml(extractConditionalFormattingStyleProps(props));
+  const existing = parseDifferentialFormats(state.styleSheetXml ?? buildDefaultStylesheetXml());
+  const found = existing.findIndex((item) => item === dxfXml);
+  if (found >= 0) {
+    return found;
+  }
+  const next = [...existing, dxfXml];
+  state.styleSheetXml = replaceDifferentialFormats(state.styleSheetXml ?? buildDefaultStylesheetXml(), next);
+  return next.length - 1;
+}
+
+function parseDifferentialFormats(xml: string) {
+  const body = /<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/.exec(xml)?.[1] ?? "";
+  return [...body.matchAll(/<dxf\b[\s\S]*?<\/dxf>/g)].map((match) => match[0]);
+}
+
+function replaceDifferentialFormats(xml: string, dxfs: string[]) {
+  const rendered = dxfs.length > 0 ? `<dxfs count="${dxfs.length}">${dxfs.join("")}</dxfs>` : "";
+  if (/<dxfs\b[\s\S]*?<\/dxfs>/.test(xml)) {
+    return xml.replace(/<dxfs\b[\s\S]*?<\/dxfs>/, rendered);
+  }
+  return xml.replace(/<\/styleSheet>/, `${rendered}</styleSheet>`);
+}
+
+function renderDifferentialFormatXml(style: { fontColor?: string; fill?: string; fontBold?: boolean }) {
+  const fontXml = style.fontColor || style.fontBold
+    ? `<font>${style.fontBold ? "<b/>" : ""}${style.fontColor ? `<color rgb="${escapeXml(style.fontColor)}"/>` : ""}</font>`
+    : "";
+  const fillXml = style.fill
+    ? `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(style.fill)}"/><bgColor indexed="64"/></patternFill></fill>`
+    : "";
+  return `<dxf>${fontXml}${fillXml}</dxf>`;
+}
+
+function normalizeTimePeriod(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const allowed = new Set([
+    "today",
+    "yesterday",
+    "tomorrow",
+    "last7days",
+    "lastmonth",
+    "thismonth",
+    "nextmonth",
+    "lastweek",
+    "thisweek",
+    "nextweek",
+  ]);
+  return allowed.has(normalized) ? normalized : "today";
 }
 
 function renderValidationXml(validation: ExcelValidationModel) {
@@ -3030,6 +3296,50 @@ function registerStyle(state: ExcelWorkbookState, props: Record<string, string>)
   return xfId;
 }
 
+function hasConditionalFormattingStyleProps(props: Record<string, string>) {
+  return Object.keys(props).some((key) => isConditionalFormattingStyleKey(key));
+}
+
+function isConditionalFormattingStyleKey(key: string) {
+  const lower = key.toLowerCase();
+  return lower === "font.color"
+    || lower === "font.bold"
+    || lower === "fill"
+    || lower === "bgcolor"
+    || lower === "bgcolor";
+}
+
+function extractConditionalFormattingStyleProps(props: Record<string, string>) {
+  const next: Partial<ExcelConditionalFormattingModel> = {};
+  if (props["font.color"] !== undefined) {
+    next.fontColor = normalizeArgbColor(props["font.color"]);
+  }
+  if (props["font.bold"] !== undefined) {
+    next.fontBold = isTruthy(props["font.bold"]);
+  }
+  if (props.fill !== undefined || props.bgColor !== undefined || props.bgcolor !== undefined) {
+    next.fillColor = normalizeArgbColor(props.fill ?? props.bgColor ?? props.bgcolor ?? "");
+  }
+  return next;
+}
+
+function serializeConditionalFormattingStyleProps(rule: Partial<ExcelConditionalFormattingModel>) {
+  return {
+    ...(rule.fontColor ? { "font.color": rule.fontColor } : {}),
+    ...(rule.fontBold !== undefined ? { "font.bold": String(rule.fontBold) } : {}),
+    ...(rule.fillColor ? { fill: rule.fillColor } : {}),
+  };
+}
+
+function registerDifferentialFormat(state: ExcelWorkbookState, props: Record<string, string>) {
+  const stylesheet = parseStylesheet(state.styleSheetXml ?? buildDefaultStylesheetXml());
+  const dxfXml = buildDifferentialFormatXml(props);
+  const existing = stylesheet.dxfs.findIndex((item) => item === dxfXml);
+  const dxfId = existing >= 0 ? existing : stylesheet.dxfs.push(dxfXml) - 1;
+  state.styleSheetXml = serializeStylesheet(stylesheet);
+  return dxfId;
+}
+
 function normalizeExcelCell(cell: ExcelCellModel | undefined): ExcelCellModel {
   return {
     value: cell?.value ?? "",
@@ -3082,17 +3392,13 @@ function evaluateFormulaForDisplay(state: ExcelWorkbookState | undefined, sheet:
 function evaluateIfFast(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
   const [condition, whenTrue = "0", whenFalse = "0"] = splitFormulaArgs(args);
   if (!condition) return undefined;
-  const conditionExpression = replaceFormulaRefsWithValues(state, condition, sheet, visited);
-  if (conditionExpression.includes("!")) return undefined;
-  try {
-    // eslint-disable-next-line no-new-func
-    const truthy = Boolean(Function(`return (${conditionExpression});`)());
-    return truthy
-      ? evaluateInlineFormulaArg(state, whenTrue.trim(), sheet, visited)
-      : evaluateInlineFormulaArg(state, whenFalse.trim(), sheet, visited);
-  } catch {
+  const truthy = evaluateCondition(state, condition.trim(), sheet, visited);
+  if (truthy === undefined) {
     return undefined;
   }
+  return truthy
+    ? evaluateInlineFormulaArg(state, whenTrue.trim(), sheet, visited)
+    : evaluateInlineFormulaArg(state, whenFalse.trim(), sheet, visited);
 }
 
 function evaluateFormulaExpression(
@@ -3298,6 +3604,41 @@ function evaluateInlineFormulaArg(state: ExcelWorkbookState | undefined, arg: st
   return Number.isFinite(numeric) ? numeric : undefined;
 }
 
+function evaluateCondition(state: ExcelWorkbookState | undefined, condition: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const match = /^(.*?)(>=|<=|<>|=|>|<)(.*)$/.exec(condition);
+  if (!match) {
+    const direct = evaluateInlineFormulaArg(state, condition, sheet, visited);
+    return direct !== undefined ? direct !== 0 : undefined;
+  }
+  const left = evaluateConditionOperand(state, match[1].trim(), sheet, visited);
+  const right = evaluateConditionOperand(state, match[3].trim(), sheet, visited);
+  if (left === undefined || right === undefined) return undefined;
+  switch (match[2]) {
+    case ">":
+      return left > right;
+    case "<":
+      return left < right;
+    case ">=":
+      return left >= right;
+    case "<=":
+      return left <= right;
+    case "=":
+      return left === right;
+    case "<>":
+      return left !== right;
+    default:
+      return undefined;
+  }
+}
+
+function evaluateConditionOperand(state: ExcelWorkbookState | undefined, operand: string, sheet: ExcelSheetModel, visited: Set<string>) {
+  const direct = evaluateInlineFormulaArg(state, operand, sheet, visited);
+  if (direct !== undefined) return direct;
+  const stripped = operand.replace(/^"|"$/g, "");
+  const numeric = Number(stripped);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
 function extractFormulaArgValues(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, visited: Set<string>) {
   return splitFormulaArgs(args)
     .flatMap((part) => {
@@ -3381,6 +3722,7 @@ interface ParsedStylesheet {
   fills: string[];
   borders: string[];
   cellXfs: string[];
+  dxfs: string[];
 }
 
 function buildDefaultStylesheetXml() {
@@ -3390,6 +3732,7 @@ function buildDefaultStylesheetXml() {
   <fills count="2">${DEFAULT_FILL_XML}<fill><patternFill patternType="gray125"/></fill></fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <dxfs count="0"></dxfs>
   <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
 </styleSheet>`;
 }
@@ -3400,6 +3743,7 @@ function parseStylesheet(xml: string): ParsedStylesheet {
     fonts: extractStyleSection(xml, "fonts", "font"),
     fills: extractStyleSection(xml, "fills", "fill"),
     borders: extractStyleSection(xml, "borders", "border"),
+    dxfs: extractStyleSection(xml, "dxfs", "dxf"),
     cellXfs: extractStyleSection(xml, "cellXfs", "xf"),
   };
 }
@@ -3461,8 +3805,67 @@ function buildAlignmentXml(props: Record<string, string>) {
   return attrs ? `<alignment ${attrs}/>` : "";
 }
 
+function isConditionalFormattingStyleKey(key: string) {
+  const lower = key.toLowerCase();
+  return lower === "fill" || lower === "font.color" || lower === "font.bold";
+}
+
+function hasConditionalFormattingStyleProps(props: Record<string, string>) {
+  return Object.keys(props).some((key) => isConditionalFormattingStyleKey(key));
+}
+
+function extractConditionalFormattingStyleProps(props: Record<string, string>) {
+  return {
+    ...(props["font.color"] ? { fontColor: normalizeArgbColor(props["font.color"]) } : {}),
+    ...(props["font.bold"] !== undefined ? { fontBold: isTruthy(props["font.bold"]) } : {}),
+    ...(props.fill ? { fill: normalizeArgbColor(props.fill) } : {}),
+  };
+}
+
+function serializeConditionalFormattingStyleProps(rule: ExcelConditionalFormattingModel): Record<string, string> {
+  return {
+    ...(rule.fontColor ? { "font.color": rule.fontColor } : {}),
+    ...(rule.fontBold !== undefined ? { "font.bold": rule.fontBold ? "true" : "false" } : {}),
+    ...(rule.fill ? { fill: rule.fill } : {}),
+  };
+}
+
+function registerDifferentialFormat(state: ExcelWorkbookState, props: Record<string, string>) {
+  const stylesheet = parseStylesheet(state.styleSheetXml ?? buildDefaultStylesheetXml());
+  const dxfXml = buildDifferentialFormatXml(props);
+  const dxfId = ensureFragment(stylesheet.dxfs, dxfXml, dxfXml);
+  state.styleSheetXml = serializeStylesheet(stylesheet);
+  return dxfId;
+}
+
+function buildDifferentialFormatXml(props: Record<string, string>) {
+  const fontColor = props["font.color"];
+  const fontBold = props["font.bold"] !== undefined && isTruthy(props["font.bold"]);
+  const fill = props.fill;
+  const fontXml = fontColor || fontBold
+    ? `<font>${fontBold ? "<b/>" : ""}${fontColor ? `<color rgb="${escapeXml(normalizeArgbColor(fontColor))}"/>` : ""}</font>`
+    : "";
+  const fillXml = fill
+    ? `<fill><patternFill patternType="solid"><bgColor rgb="${escapeXml(normalizeArgbColor(fill))}"/></patternFill></fill>`
+    : "";
+  return `<dxf>${fontXml}${fillXml}</dxf>`;
+}
+
+function normalizeTimePeriod(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "last7days" ? "last7Days"
+    : normalized === "thisweek" ? "thisWeek"
+    : normalized === "lastweek" ? "lastWeek"
+    : normalized === "nextweek" ? "nextWeek"
+    : normalized === "thismonth" ? "thisMonth"
+    : normalized === "lastmonth" ? "lastMonth"
+    : normalized === "nextmonth" ? "nextMonth"
+    : normalized;
+}
+
 function serializeStylesheet(stylesheet: ParsedStylesheet) {
   const numFmts = stylesheet.numFmts.length > 0 ? `<numFmts count="${stylesheet.numFmts.length}">${stylesheet.numFmts.join("")}</numFmts>` : "";
+  const dxfs = `<dxfs count="${stylesheet.dxfs.length}">${stylesheet.dxfs.join("")}</dxfs>`;
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   ${numFmts}
@@ -3470,6 +3873,7 @@ function serializeStylesheet(stylesheet: ParsedStylesheet) {
   <fills count="${stylesheet.fills.length}">${stylesheet.fills.join("")}</fills>
   <borders count="${stylesheet.borders.length}">${stylesheet.borders.join("")}</borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  ${dxfs}
   <cellXfs count="${stylesheet.cellXfs.length}">${stylesheet.cellXfs.join("")}</cellXfs>
 </styleSheet>`;
 }
@@ -4018,6 +4422,23 @@ function normalizeCalcMode(value: string) {
 function normalizeRefMode(value: string) {
   const normalized = value.trim().toUpperCase();
   return normalized === "R1C1" ? "R1C1" : "A1";
+}
+
+function normalizeTimePeriod(value: string) {
+  const normalized = value.trim().toLowerCase();
+  const allowed = new Set([
+    "today",
+    "yesterday",
+    "tomorrow",
+    "last7days",
+    "lastweek",
+    "thisweek",
+    "nextweek",
+    "lastmonth",
+    "thismonth",
+    "nextmonth",
+  ]);
+  return allowed.has(normalized) ? normalized : "today";
 }
 
 function normalizeArgbColor(value: string) {

@@ -548,6 +548,68 @@ describe("officekit CLI scaffold", () => {
     expect(rawSheet.stdout).toContain('iconSet="5Arrows"');
   });
 
+  test("adds advanced Excel conditional-formatting rule families with dxf-backed details", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-cf-advanced-"));
+    const filePath = path.join(dir, "cf-advanced.xlsx");
+    await runCli(["create", filePath]);
+    await runCli(["set", filePath, "/Sheet1/A1", "--prop", "value=10", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A2", "--prop", "value=20", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A3", "--prop", "value=20", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/B1", "--prop", "value=Alpha"]);
+    await runCli(["set", filePath, "/Sheet1/B2", "--prop", "value=Beta"]);
+    await runCli(["set", filePath, "/Sheet1/B3", "--prop", "value=Alpha"]);
+
+    await runCli(["add", filePath, "/Sheet1", "--type", "formulacf", "--prop", "sqref=A1:A3", "--prop", "formula=$A1>15", "--prop", "fill=FFF2CC", "--prop", "font.bold=true"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "topn", "--prop", "range=A1:A3", "--prop", "rank=2", "--prop", "percent=true", "--prop", "bottom=true", "--prop", "font.color=FF0000"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "aboveaverage", "--prop", "range=A1:A3", "--prop", "above=false", "--prop", "fill=DDEBF7"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "duplicatevalues", "--prop", "range=A1:A3", "--prop", "fill=F4CCCC"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "uniquevalues", "--prop", "range=A1:A3", "--prop", "font.color=00AA00"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "containstext", "--prop", "range=B1:B3", "--prop", "text=Alpha", "--prop", "fill=EAD1DC"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "dateoccurring", "--prop", "range=A1:A3", "--prop", "period=nextmonth", "--prop", "font.bold=true"]);
+
+    await runCli(["set", filePath, "/Sheet1/cf[1]", "--prop", "formula=$A1>=20"]);
+    await runCli(["set", filePath, "/Sheet1/cf[2]", "--prop", "rank=1", "--prop", "percent=false"]);
+    await runCli(["set", filePath, "/Sheet1/cf[6]", "--prop", "text=Beta"]);
+    await runCli(["set", filePath, "/Sheet1/cf[7]", "--prop", "period=last7days"]);
+
+    const cf1 = await runCli(["get", filePath, "/Sheet1/cf[1]", "--json"]);
+    const cf2 = await runCli(["get", filePath, "/Sheet1/cf[2]", "--json"]);
+    const cf3 = await runCli(["get", filePath, "/Sheet1/cf[3]", "--json"]);
+    const cf4 = await runCli(["get", filePath, "/Sheet1/cf[4]", "--json"]);
+    const cf5 = await runCli(["get", filePath, "/Sheet1/cf[5]", "--json"]);
+    const cf6 = await runCli(["get", filePath, "/Sheet1/cf[6]", "--json"]);
+    const cf7 = await runCli(["get", filePath, "/Sheet1/cf[7]", "--json"]);
+    const cfQuery = await runCli(["query", filePath, "cf"]);
+    const rawSheet = await runCli(["raw", filePath, "/Sheet1"]);
+    const rawStyles = await runCli(["raw", filePath, "/styles"]);
+
+    expect(cf1.stdout).toContain('"cfType": "formula"');
+    expect(cf1.stdout).toContain('"formula": "$A1>=20"');
+    expect(cf1.stdout).toContain('"dxfId": 0');
+    expect(cf2.stdout).toContain('"cfType": "topn"');
+    expect(cf2.stdout).toContain('"rank": 1');
+    expect(cf2.stdout).not.toContain('"percent": true');
+    expect(cf3.stdout).toContain('"cfType": "aboveaverage"');
+    expect(cf3.stdout).toContain('"above": false');
+    expect(cf4.stdout).toContain('"cfType": "duplicatevalues"');
+    expect(cf5.stdout).toContain('"cfType": "uniquevalues"');
+    expect(cf6.stdout).toContain('"cfType": "containstext"');
+    expect(cf6.stdout).toContain('"text": "Beta"');
+    expect(cf7.stdout).toContain('"cfType": "dateoccurring"');
+    expect(cf7.stdout).toContain('"period": "last7Days"');
+    expect(cfQuery.stdout).toContain('"cfType": "formula"');
+    expect(cfQuery.stdout).toContain('"cfType": "duplicatevalues"');
+    expect(rawSheet.stdout).toContain('<cfRule type="expression"');
+    expect(rawSheet.stdout).toContain('<cfRule type="top10"');
+    expect(rawSheet.stdout).toContain('<cfRule type="aboveAverage"');
+    expect(rawSheet.stdout).toContain('<cfRule type="duplicateValues"');
+    expect(rawSheet.stdout).toContain('<cfRule type="uniqueValues"');
+    expect(rawSheet.stdout).toContain('<cfRule type="containsText"');
+    expect(rawSheet.stdout).toContain('<cfRule type="timePeriod"');
+    expect(rawSheet.stdout).toContain('timePeriod="last7Days"');
+    expect(rawStyles.stdout).toContain('<dxfs count="7">');
+  });
+
   test("evaluates simple formulas for display and creates styles from cell props", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-style-formula-"));
     const filePath = path.join(dir, "style-formula.xlsx");
