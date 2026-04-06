@@ -188,6 +188,106 @@ describe("officekit CLI scaffold", () => {
     expect(xml).toContain(' s="3"');
   });
 
+  test("supports Excel sheet properties, extended views, and query selectors", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-sheet-props-"));
+    const filePath = path.join(dir, "sheet-props.xlsx");
+    await runCli(["create", filePath]);
+    await runCli([
+      "set",
+      filePath,
+      "/Sheet1",
+      "--prop",
+      "freeze=B2",
+      "--prop",
+      "zoom=125",
+      "--prop",
+      "gridlines=false",
+      "--prop",
+      "headings=false",
+      "--prop",
+      "tabColor=1A2B3C",
+      "--prop",
+      "header=&CQuarterly Report",
+      "--prop",
+      "footer=&RConfidential",
+      "--prop",
+      "orientation=landscape",
+      "--prop",
+      "paperSize=9",
+      "--prop",
+      "fitToPage=1x2",
+      "--prop",
+      "protect=true",
+      "--prop",
+      "autoFilter=A1:B5",
+      "--prop",
+      "rowBreaks=5,10",
+      "--prop",
+      "colBreaks=3",
+    ]);
+    await runCli(["set", filePath, "/Sheet1/A1", "--prop", "value=12"]);
+    await runCli(["set", filePath, "/Sheet1/B1", "--prop", "formula==SUM(A1:A1)", "--prop", "value=12"]);
+    await runCli(["add", filePath, "/", "--type", "namedrange", "--prop", "name=Revenue", "--prop", "ref=Sheet1!A1:B1"]);
+
+    const sheet = await runCli(["get", filePath, "/Sheet1", "--json"]);
+    const row = await runCli(["get", filePath, "/Sheet1/row[1]", "--json"]);
+    const column = await runCli(["get", filePath, "/Sheet1/col[A]", "--json"]);
+    const range = await runCli(["get", filePath, "/Sheet1/A1:B1", "--json"]);
+    const textView = await runCli(["view", filePath, "text"]);
+    const annotatedView = await runCli(["view", filePath, "annotated"]);
+    const statsView = await runCli(["view", filePath, "stats"]);
+    const issuesView = await runCli(["view", filePath, "issues"]);
+    const formulaQuery = await runCli(["query", filePath, "formula"]);
+    const sheetQuery = await runCli(["query", filePath, "sheet"]);
+    const namedRangeQuery = await runCli(["query", filePath, "namedrange"]);
+    const rawSheet = await runCli(["raw", filePath, "/Sheet1"]);
+
+    expect(sheet.stdout).toContain('"freezeTopLeftCell": "B2"');
+    expect(sheet.stdout).toContain('"zoom": 125');
+    expect(sheet.stdout).toContain('"showGridLines": false');
+    expect(sheet.stdout).toContain('"showHeadings": false');
+    expect(sheet.stdout).toContain('"tabColor": "FF1A2B3C"');
+    expect(sheet.stdout).toContain('"orientation": "landscape"');
+    expect(sheet.stdout).toContain('"paperSize": 9');
+    expect(sheet.stdout).toContain('"fitToPage": "1x2"');
+    expect(sheet.stdout).toContain('"protection": true');
+    expect(sheet.stdout).toContain('"rowBreaks": [');
+    expect(row.stdout).toContain('"ref": "A1"');
+    expect(column.stdout).toContain('"ref": "A1"');
+    expect(range.stdout).toContain('"ref": "A1"');
+    expect(range.stdout).toContain('"ref": "B1"');
+    expect(textView.stdout).toContain("[/Sheet1/row[1]] 12\t12");
+    expect(annotatedView.stdout).toContain("B1: [12] <- =SUM(A1:A1)");
+    expect(statsView.stdout).toContain("Formula Cells: 1");
+    expect(issuesView.stdout).toContain("No issues found.");
+    expect(formulaQuery.stdout).toContain('"ref": "B1"');
+    expect(sheetQuery.stdout).toContain('"name": "Sheet1"');
+    expect(namedRangeQuery.stdout).toContain('"name": "Revenue"');
+    expect(rawSheet.stdout).toContain('zoomScale="125"');
+    expect(rawSheet.stdout).toContain('showGridLines="0"');
+    expect(rawSheet.stdout).toContain('showRowColHeaders="0"');
+    expect(rawSheet.stdout).toContain('tabColor rgb="FF1A2B3C"');
+    expect(rawSheet.stdout).toContain('orientation="landscape"');
+    expect(rawSheet.stdout).toContain('paperSize="9"');
+    expect(rawSheet.stdout).toContain('sheetProtection sheet="1"');
+  });
+
+  test("supports Excel raw parts and filtered raw sheet output", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-raw-parts-"));
+    const filePath = path.join(dir, "raw-parts.xlsx");
+    await writeFile(filePath, buildExternalExcelSettingsZip());
+
+    const workbookRaw = await runCli(["raw", filePath, "/workbook"]);
+    const stylesRaw = await runCli(["raw", filePath, "/styles"]);
+    const sharedStringsRaw = await runCli(["raw", filePath, "/sharedstrings"]);
+    const sheetRaw = await runCli(["raw", filePath, "/Sheet1", "--start-row", "1", "--end-row", "1", "--cols", "A"]);
+
+    expect(workbookRaw.stdout).toContain("<workbook");
+    expect(stylesRaw.stdout).toContain("<styleSheet");
+    expect(sharedStringsRaw.stdout).toContain("Shared hello");
+    expect(sheetRaw.stdout).toContain('r="A1"');
+  });
+
   test("creates and mutates a PowerPoint document vertical slice", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-ppt-"));
     const filePath = path.join(dir, "demo.pptx");

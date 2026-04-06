@@ -578,6 +578,258 @@ export function renderDocumentOutline(document: OfficekitDocument): string {
   }).join("\n") || "Presentation is empty.";
 }
 
+function renderExcelView(document: OfficekitDocument, mode: string) {
+  switch (mode) {
+    case "html":
+      return renderDocumentHtml(document);
+    case "outline":
+      return renderDocumentOutline(document);
+    case "json":
+      return JSON.stringify(document.excel, null, 2);
+    case "text":
+      return renderExcelTextView(document);
+    case "annotated":
+      return renderExcelAnnotatedView(document);
+    case "stats":
+      return renderExcelStatsView(document);
+    case "issues":
+      return renderExcelIssuesView(document);
+    default:
+      throw new UsageError(`Unsupported Excel view mode '${mode}'.`, "Use text, annotated, outline, stats, issues, html, or json.");
+  }
+}
+
+function renderExcelTextView(document: OfficekitDocument) {
+  const lines: string[] = [];
+  for (const sheet of document.excel!.sheets) {
+    lines.push(`=== Sheet: ${sheet.name} ===`);
+    const rows = groupCellsByRow(sheet);
+    for (const [rowNumber, rowCells] of rows) {
+      lines.push(`[/${sheet.name}/row[${rowNumber}]] ${rowCells.map(([, cell]) => cell.value).join("\t")}`);
+    }
+  }
+  return lines.join("\n").trimEnd() || "(empty workbook)";
+}
+
+function renderExcelAnnotatedView(document: OfficekitDocument) {
+  const lines: string[] = [];
+  for (const sheet of document.excel!.sheets) {
+    lines.push(`=== Sheet: ${sheet.name} ===`);
+    for (const [ref, cell] of Object.entries(sheet.cells).sort(([left], [right]) => compareCellRefs(left, right))) {
+      const annotation = cell.formula ? `=${cell.formula}` : cell.type ?? "number";
+      const warnings = [
+        cell.value === "" && !cell.formula ? "empty" : "",
+        cell.formula && cell.value === "" ? "unevaluated-formula" : "",
+      ].filter(Boolean);
+      lines.push(`  ${ref}: [${cell.value}] <- ${annotation}${warnings.length > 0 ? ` (${warnings.join(", ")})` : ""}`);
+    }
+  }
+  return lines.join("\n").trimEnd() || "(empty workbook)";
+}
+
+function renderExcelStatsView(document: OfficekitDocument) {
+  let totalCells = 0;
+  let emptyCells = 0;
+  let formulaCells = 0;
+  const typeCounts = new Map<string, number>();
+  for (const sheet of document.excel!.sheets) {
+    for (const cell of Object.values(sheet.cells)) {
+      totalCells += 1;
+      if (cell.value === "") emptyCells += 1;
+      if (cell.formula) formulaCells += 1;
+      const type = cell.type ?? (cell.formula ? "formula" : "number");
+      typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1);
+    }
+  }
+  return [
+    `Sheets: ${document.excel!.sheets.length}`,
+    `Total Cells: ${totalCells}`,
+    `Empty Cells: ${emptyCells}`,
+    `Formula Cells: ${formulaCells}`,
+    "",
+    "Data Type Distribution:",
+    ...[...typeCounts.entries()].sort((left, right) => right[1] - left[1]).map(([type, count]) => `  ${type}: ${count}`),
+  ].join("\n").trimEnd();
+}
+
+function renderExcelIssuesView(document: OfficekitDocument) {
+  const issues: string[] = [];
+  for (const sheet of document.excel!.sheets) {
+    if (sheet.autoFilter && !/^[A-Z]+\d+:[A-Z]+\d+$/.test(sheet.autoFilter)) {
+      issues.push(`${sheet.name}: invalid autoFilter range '${sheet.autoFilter}'`);
+    }
+    for (const [ref, cell] of Object.entries(sheet.cells)) {
+      if (cell.formula && cell.value === "") {
+        issues.push(`${sheet.name}!${ref}: formula has no cached value`);
+      }
+      if (cell.type === "date" && !/^-?\d+(\.\d+)?$/.test(cell.value)) {
+        issues.push(`${sheet.name}!${ref}: date cell is not stored as numeric serial`);
+      }
+    }
+  }
+  return issues.join("\n") || "No issues found.";
+}
+
+function queryExcelNodes(document: OfficekitDocument, selector: string) {
+  const normalized = selector.trim();
+  if (normalized.startsWith("/")) {
+    return [materializePath(document, normalized)];
+  }
+  if (normalized === "sheet" || normalized === "sheets") {
+    return document.excel!.sheets.map((sheet) => materializePath(document, `/${sheet.name}`));
+  }
+  if (normalized === "namedrange" || normalized === "namedranges") {
+    return (document.excel?.namedRanges ?? []).map((_, index) => materializePath(document, `/namedrange[${index + 1}]`));
+  }
+  if (normalized === "row") {
+    return document.excel!.sheets.flatMap((sheet) => [...groupCellsByRow(sheet).keys()].map((row) => materializePath(document, `/${sheet.name}/row[${row}]`)));
+  }
+  if (normalized === "column" || normalized === "col") {
+    return document.excel!.sheets.flatMap((sheet) =>
+      [...new Set(Object.keys(sheet.cells).map((ref) => /^([A-Z]+)/.exec(ref)?.[1] ?? "A"))]
+        .sort((left, right) => columnNameToIndex(left) - columnNameToIndex(right))
+        .map((column) => materializePath(document, `/${sheet.name}/col[${column}]`)),
+    );
+  }
+  if (normalized === "cell" || normalized === "cells") {
+    return document.excel!.sheets.flatMap((sheet) =>
+      Object.keys(sheet.cells)
+        .sort(compareCellRefs)
+        .map((ref) => materializePath(document, `/${sheet.name}/${ref}`)),
+    );
+  }
+  if (normalized === "formula" || normalized === "cell[formula]") {
+    return document.excel!.sheets.flatMap((sheet) =>
+      Object.entries(sheet.cells)
+        .filter(([, cell]) => Boolean(cell.formula))
+        .sort(([left], [right]) => compareCellRefs(left, right))
+        .map(([ref]) => materializePath(document, `/${sheet.name}/${ref}`)),
+    );
+  }
+  return [];
+}
+
+function renderExcelRaw(zip: Map<string, Buffer>, options: RawDocumentOptions, document: OfficekitDocument) {
+  const partPath = options.partPath ?? "/";
+  if (partPath === "/" || partPath === "/workbook") {
+    return requireEntry(zip, "xl/workbook.xml");
+  }
+  if (partPath === "/styles") {
+    const styles = zip.get("xl/styles.xml");
+    return styles ? styles.toString("utf8") : "(no styles)";
+  }
+  if (partPath === "/sharedstrings") {
+    const sharedStrings = zip.get("xl/sharedStrings.xml");
+    return sharedStrings ? sharedStrings.toString("utf8") : "(no shared strings)";
+  }
+  const drawingMatch = /^\/([^/]+)\/drawing$/i.exec(partPath);
+  if (drawingMatch) {
+    const sheetName = drawingMatch[1];
+    const workbookRels = parseRelationships(requireEntry(zip, "xl/_rels/workbook.xml.rels"));
+    const workbookXml = requireEntry(zip, "xl/workbook.xml");
+    const relationshipId = [...workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)]
+      .find((match) => decodeXml(match[1]).toLowerCase() === sheetName.toLowerCase())?.[2];
+    if (!relationshipId) throw new OfficekitError(`Sheet '${sheetName}' not found.`, "not_found");
+    const worksheetPath = normalizeZipPath("xl", workbookRels.get(relationshipId) ?? "");
+    const worksheetRelsEntry = getRelationshipsEntryName(worksheetPath);
+    const worksheetRels = zip.get(worksheetRelsEntry);
+    if (!worksheetRels) throw new OfficekitError(`Sheet '${sheetName}' has no drawings.`, "not_found");
+    const drawingTarget = parseRelationshipEntries(worksheetRels.toString("utf8")).find((entry) => entry.type?.endsWith("/drawing"))?.target;
+    if (!drawingTarget) throw new OfficekitError(`Sheet '${sheetName}' has no drawings.`, "not_found");
+    return requireEntry(zip, normalizeZipPath(path.posix.dirname(worksheetPath), drawingTarget));
+  }
+  const chartMatch = /^\/([^/]+)\/chart\[(\d+)\]$/i.exec(partPath);
+  if (chartMatch) {
+    return resolveChartXml(zip, chartMatch[1], Number(chartMatch[2]));
+  }
+  const globalChartMatch = /^\/chart\[(\d+)\]$/i.exec(partPath);
+  if (globalChartMatch) {
+    return resolveGlobalChartXml(zip, Number(globalChartMatch[1]));
+  }
+  const sheetMatch = /^\/([^/]+)$/i.exec(partPath);
+  if (sheetMatch) {
+    const sheet = ensureSheet(document, sheetMatch[1]);
+    if (options.startRow !== undefined || options.endRow !== undefined || options.cols?.length) {
+      return renderFilteredSheetXml(sheet, options);
+    }
+    const workbookXml = requireEntry(zip, "xl/workbook.xml");
+    const workbookRels = parseRelationships(requireEntry(zip, "xl/_rels/workbook.xml.rels"));
+    const relationshipId = [...workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)]
+      .find((match) => decodeXml(match[1]).toLowerCase() === sheet.name.toLowerCase())?.[2];
+    if (!relationshipId) throw new OfficekitError(`Sheet '${sheet.name}' not found.`, "not_found");
+    return requireEntry(zip, normalizeZipPath("xl", workbookRels.get(relationshipId) ?? ""));
+  }
+  throw new UsageError(`Unsupported Excel raw part '${partPath}'.`, "Use /workbook, /styles, /sharedstrings, /Sheet1, /Sheet1/drawing, /Sheet1/chart[1], or /chart[1].");
+}
+
+function renderFilteredSheetXml(sheet: ExcelSheet, options: RawDocumentOptions) {
+  const clone: ExcelSheet = {
+    ...sheet,
+    cells: Object.fromEntries(
+      Object.entries(sheet.cells).filter(([ref]) => {
+        const { column, row } = parseCellAddress(ref);
+        if (options.startRow !== undefined && row < options.startRow) return false;
+        if (options.endRow !== undefined && row > options.endRow) return false;
+        if (options.cols?.length && !options.cols.includes(column)) return false;
+        return true;
+      }),
+    ),
+  };
+  return renderSheetXml(clone);
+}
+
+function resolveChartXml(zip: Map<string, Buffer>, sheetName: string, index: number) {
+  const workbookXml = requireEntry(zip, "xl/workbook.xml");
+  const workbookRels = parseRelationships(requireEntry(zip, "xl/_rels/workbook.xml.rels"));
+  const relationshipId = [...workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"/g)]
+    .find((match) => decodeXml(match[1]).toLowerCase() === sheetName.toLowerCase())?.[2];
+  if (!relationshipId) throw new OfficekitError(`Sheet '${sheetName}' not found.`, "not_found");
+  const worksheetPath = normalizeZipPath("xl", workbookRels.get(relationshipId) ?? "");
+  const worksheetRels = parseRelationshipEntries(requireEntry(zip, getRelationshipsEntryName(worksheetPath)));
+  const drawingTarget = worksheetRels.find((entry) => entry.type?.endsWith("/drawing"))?.target;
+  if (!drawingTarget) throw new OfficekitError(`Sheet '${sheetName}' has no charts.`, "not_found");
+  const drawingPath = normalizeZipPath(path.posix.dirname(worksheetPath), drawingTarget);
+  const drawingXml = requireEntry(zip, drawingPath);
+  const drawingRels = parseRelationshipEntries(requireEntry(zip, getRelationshipsEntryName(drawingPath)));
+  const chartIds = [...drawingXml.matchAll(/<c:chart\b[^>]*r:id="([^"]+)"/g)].map((match) => match[1]);
+  const chartId = chartIds[index - 1];
+  if (!chartId) throw new OfficekitError(`Chart ${index} does not exist in sheet '${sheetName}'.`, "not_found");
+  const chartTarget = drawingRels.find((entry) => entry.id === chartId)?.target;
+  if (!chartTarget) throw new OfficekitError(`Chart ${index} relationship is missing.`, "invalid_ooxml");
+  return requireEntry(zip, normalizeZipPath(path.posix.dirname(drawingPath), chartTarget));
+}
+
+function resolveGlobalChartXml(zip: Map<string, Buffer>, index: number) {
+  const workbookXml = requireEntry(zip, "xl/workbook.xml");
+  const sheetNames = [...workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*name="([^"]+)"/g)].map((match) => decodeXml(match[1]));
+  let seen = 0;
+  for (const sheetName of sheetNames) {
+    try {
+      let sheetIndex = 1;
+      while (true) {
+        const chartXml = resolveChartXml(zip, sheetName, sheetIndex);
+        seen += 1;
+        if (seen === index) return chartXml;
+        sheetIndex += 1;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new OfficekitError(`Chart ${index} does not exist.`, "not_found");
+}
+
+function groupCellsByRow(sheet: ExcelSheet) {
+  const rows = new Map<number, Array<[string, ExcelCell]>>();
+  for (const [ref, cell] of Object.entries(sheet.cells).sort(([left], [right]) => compareCellRefs(left, right))) {
+    const rowNumber = parseCellAddress(ref).row;
+    const row = rows.get(rowNumber) ?? [];
+    row.push([ref, cell]);
+    rows.set(rowNumber, row);
+  }
+  return rows;
+}
+
 export function parseProps(argv: string[]) {
   const props: Record<string, string> = {};
   let type: string | undefined;
@@ -1223,15 +1475,57 @@ function renderSheetXml(sheet: ExcelSheet) {
     rows.set(row, cells);
   }
   const xmlRows = [...rows.entries()].sort(([a], [b]) => a - b).map(([rowIndex, cells]) => `<row r="${rowIndex}">${cells.join("")}</row>`).join("");
-  const sheetViews = sheet.freezeTopLeftCell
-    ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="${escapeXml(sheet.freezeTopLeftCell)}" state="frozen" activePane="bottomLeft"/></sheetView></sheetViews>`
+  const sheetViewAttrs = [
+    sheet.zoom !== undefined ? ` zoomScale="${sheet.zoom}"` : "",
+    sheet.showGridLines === false ? ` showGridLines="0"` : "",
+    sheet.showHeadings === false ? ` showRowColHeaders="0"` : "",
+  ].join("");
+  const pane = sheet.freezeTopLeftCell
+    ? `<pane ySplit="1" topLeftCell="${escapeXml(sheet.freezeTopLeftCell)}" state="frozen" activePane="bottomLeft"/>`
+    : "";
+  const sheetViews = pane || sheetViewAttrs
+    ? `<sheetViews><sheetView workbookViewId="0"${sheetViewAttrs}>${pane}</sheetView></sheetViews>`
+    : "";
+  const sheetPr = sheet.tabColor
+    ? `<sheetPr><tabColor rgb="${escapeXml(normalizeColorValue(sheet.tabColor))}"/></sheetPr>`
     : "";
   const autoFilter = sheet.autoFilter ? `<autoFilter ref="${escapeXml(sheet.autoFilter)}"/>` : "";
+  const pageSetupAttrs = [
+    sheet.orientation ? ` orientation="${escapeXml(sheet.orientation)}"` : "",
+    sheet.paperSize !== undefined ? ` paperSize="${sheet.paperSize}"` : "",
+    ...(sheet.fitToPage
+      ? (() => {
+          const [width, height] = sheet.fitToPage!.split("x");
+          return [
+            ` fitToWidth="${Number(width ?? "1")}"`,
+            ` fitToHeight="${Number(height ?? "1")}"`,
+          ];
+        })()
+      : []),
+  ].join("");
+  const pageSetup = pageSetupAttrs ? `<pageSetup${pageSetupAttrs}/>` : "";
+  const headerFooter =
+    sheet.header || sheet.footer
+      ? `<headerFooter>${sheet.header ? `<oddHeader>${escapeXml(sheet.header)}</oddHeader>` : ""}${sheet.footer ? `<oddFooter>${escapeXml(sheet.footer)}</oddFooter>` : ""}</headerFooter>`
+      : "";
+  const protection = sheet.protection ? `<sheetProtection sheet="1"/>` : "";
+  const rowBreaks = sheet.rowBreaks?.length
+    ? `<rowBreaks count="${sheet.rowBreaks.length}" manualBreakCount="${sheet.rowBreaks.length}">${sheet.rowBreaks.map((row) => `<brk id="${row}" man="1"/>`).join("")}</rowBreaks>`
+    : "";
+  const colBreaks = sheet.colBreaks?.length
+    ? `<colBreaks count="${sheet.colBreaks.length}" manualBreakCount="${sheet.colBreaks.length}">${sheet.colBreaks.map((column) => `<brk id="${column}" man="1"/>`).join("")}</colBreaks>`
+    : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  ${sheetPr}
   ${sheetViews}
   <sheetData>${xmlRows}</sheetData>
   ${autoFilter}
+  ${protection}
+  ${pageSetup}
+  ${headerFooter}
+  ${rowBreaks}
+  ${colBreaks}
 </worksheet>`;
 }
 
@@ -1623,9 +1917,34 @@ function parseSheetCells(xml: string, zip: Map<string, Buffer>) {
 function parseSheetFeatures(xml: string) {
   const autoFilter = /<(?:\w+:)?autoFilter\b[^>]*ref="([^"]+)"/.exec(xml)?.[1];
   const freezeTopLeftCell = /<(?:\w+:)?pane\b[^>]*topLeftCell="([^"]+)"/.exec(xml)?.[1];
+  const zoom = /<(?:\w+:)?sheetView\b[^>]*zoomScale="([^"]+)"/.exec(xml)?.[1];
+  const showGridLines = /<(?:\w+:)?sheetView\b[^>]*showGridLines="([^"]+)"/.exec(xml)?.[1];
+  const showHeadings = /<(?:\w+:)?sheetView\b[^>]*showRowColHeaders="([^"]+)"/.exec(xml)?.[1];
+  const tabColor = /<(?:\w+:)?tabColor\b[^>]*rgb="([^"]+)"/.exec(xml)?.[1];
+  const header = /<(?:\w+:)?oddHeader>([\s\S]*?)<\/(?:\w+:)?oddHeader>/.exec(xml)?.[1];
+  const footer = /<(?:\w+:)?oddFooter>([\s\S]*?)<\/(?:\w+:)?oddFooter>/.exec(xml)?.[1];
+  const orientation = /<(?:\w+:)?pageSetup\b[^>]*orientation="([^"]+)"/.exec(xml)?.[1];
+  const paperSize = /<(?:\w+:)?pageSetup\b[^>]*paperSize="([^"]+)"/.exec(xml)?.[1];
+  const fitToWidth = /<(?:\w+:)?pageSetup\b[^>]*fitToWidth="([^"]+)"/.exec(xml)?.[1];
+  const fitToHeight = /<(?:\w+:)?pageSetup\b[^>]*fitToHeight="([^"]+)"/.exec(xml)?.[1];
+  const protection = /<(?:\w+:)?sheetProtection\b[^>]*sheet="([^"]+)"/.exec(xml)?.[1];
+  const rowBreaks = [...xml.matchAll(/<(?:\w+:)?rowBreaks\b[\s\S]*?<brk\b[^>]*id="([^"]+)"/g)].map((match) => Number(match[1]));
+  const colBreaks = [...xml.matchAll(/<(?:\w+:)?colBreaks\b[\s\S]*?<brk\b[^>]*id="([^"]+)"/g)].map((match) => Number(match[1]));
   return {
     ...(autoFilter ? { autoFilter } : {}),
     ...(freezeTopLeftCell ? { freezeTopLeftCell } : {}),
+    ...(zoom ? { zoom: Number(zoom) } : {}),
+    ...(showGridLines !== undefined ? { showGridLines: isTruthy(showGridLines) } : {}),
+    ...(showHeadings !== undefined ? { showHeadings: isTruthy(showHeadings) } : {}),
+    ...(tabColor ? { tabColor: decodeXml(tabColor) } : {}),
+    ...(header ? { header: decodeXml(header) } : {}),
+    ...(footer ? { footer: decodeXml(footer) } : {}),
+    ...(orientation ? { orientation: decodeXml(orientation) } : {}),
+    ...(paperSize ? { paperSize: Number(paperSize) } : {}),
+    ...(fitToWidth || fitToHeight ? { fitToPage: `${fitToWidth ?? "1"}x${fitToHeight ?? "1"}` } : {}),
+    ...(protection !== undefined ? { protection: isTruthy(protection) } : {}),
+    ...(rowBreaks.length > 0 ? { rowBreaks } : {}),
+    ...(colBreaks.length > 0 ? { colBreaks } : {}),
   };
 }
 
@@ -1791,6 +2110,14 @@ function mergeWorkbookSettings(
 
 function isTruthy(value: string) {
   return /^(1|true|yes|on)$/i.test(value.trim());
+}
+
+function normalizeColorValue(value: string) {
+  const cleaned = value.trim().replace(/^#/, "").toUpperCase();
+  if (cleaned.length === 6) {
+    return `FF${cleaned}`;
+  }
+  return cleaned;
 }
 
 function parseWorkbookPropertyAttributes(attrs?: string): ExcelWorkbookSettings {
