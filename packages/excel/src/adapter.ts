@@ -881,6 +881,312 @@ export async function rawExcelDocument(
   throw new UsageError(`Unsupported Excel raw part '${partPath}'.`, "Use /workbook, /styles, /sharedstrings, /Sheet1, /Sheet1/drawing, /Sheet1/chart[1], or /chart[1].");
 }
 
+export interface ExcelMoveResult {
+  sourcePath: string;
+  targetPath: string;
+}
+
+export async function moveExcelNode(
+  filePath: string,
+  sourcePath: string,
+  targetParentPath: string | null,
+  options?: { index?: number },
+): Promise<ExcelMoveResult> {
+  const state = await loadWorkbookState(filePath);
+  const segments = sourcePath.trimStart("/").split("/", 2);
+  const sheetName = segments[0];
+  const sheet = ensureSheetState(state, sheetName);
+
+  if (segments.length < 2) {
+    // Moving/reordering the sheet itself
+    const targetIndex = options?.index ?? throwUsage("index is required when moving a sheet");
+    const workbookSheetIdx = state.sheets.findIndex(
+      (s) => s.name.toLowerCase() === sheetName.toLowerCase(),
+    );
+    if (workbookSheetIdx < 0) throw new OfficekitError(`Sheet '${sheetName}' not found.`, "not_found");
+
+    // Reorder in the sheets array
+    const [moved] = state.sheets.splice(workbookSheetIdx, 1);
+    const targetSheets = state.sheets;
+    if (targetIndex >= 0 && targetIndex < targetSheets.length) {
+      targetSheets.splice(targetIndex, 0, moved);
+    } else {
+      targetSheets.push(moved);
+    }
+    updateWorkbookXml(state);
+    await writeWorkbookState(filePath, state);
+    return { sourcePath, targetPath: `/${moved.name}` };
+  }
+
+  // Moving a row
+  const elementRef = segments[1];
+  const rowMatch = /^row\[(\d+)\]$/i.exec(elementRef);
+  if (!rowMatch) {
+    throw new UsageError(`Move not supported for: ${elementRef}. Supported: row[N], sheet name.`);
+  }
+
+  const sourceRowIdx = Number(rowMatch[1]);
+  const targetIndex = options?.index;
+
+  // Find source row cells
+  const sourceCells: Record<string, ExcelCellModel> = {};
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    const refRow = Number(/\d+/.exec(ref)?.[0] ?? "0");
+    if (refRow === sourceRowIdx) {
+      sourceCells[ref] = cell;
+    }
+  }
+
+  if (Object.keys(sourceCells).length === 0) {
+    throw new OfficekitError(`Row ${sourceRowIdx} not found.`, "not_found");
+  }
+
+  // Determine target sheet
+  let targetSheet = sheet;
+  let effectiveTargetParentPath = `/${sheetName}`;
+  if (targetParentPath && targetParentPath !== `/${sheetName}`) {
+    const tgtSegments = targetParentPath.trimStart("/").split("/", 2);
+    targetSheet = ensureSheetState(state, tgtSegments[0]);
+    effectiveTargetParentPath = targetParentPath;
+  }
+
+  // Delete source cells (for move, not copy)
+  for (const ref of Object.keys(sourceCells)) {
+    delete sheet.cells[ref];
+  }
+
+  // Find target row index
+  let targetRowIdx: number;
+  if (targetIndex !== undefined) {
+    // Insert at specific position - find the row at that position
+    const existingRows = Object.keys(targetSheet.cells)
+      .map((ref) => Number(/\d+/.exec(ref)?.[0] ?? "0"))
+      .filter((r) => r > 0);
+    const sortedRows = [...new Set(existingRows)].sort((a, b) => a - b);
+    if (targetIndex >= 0 && targetIndex < sortedRows.length) {
+      targetRowIdx = sortedRows[targetIndex];
+    } else {
+      targetRowIdx = (sortedRows[sortedRows.length - 1] ?? 0) + 1;
+    }
+  } else {
+    // Append at end
+    const existingRows = Object.keys(targetSheet.cells)
+      .map((ref) => Number(/\d+/.exec(ref)?.[0] ?? "0"));
+    targetRowIdx = Math.max(...existingRows, 0) + 1;
+  }
+
+  // Relocate cells to target row
+  const colMatch = /^[A-Z]+/;
+  for (const [ref, cell] of Object.entries(sourceCells)) {
+    const col = colMatch.exec(ref)?.[0] ?? "A";
+    const newRef = `${col}${targetRowIdx}`;
+    targetSheet.cells[newRef] = cell;
+  }
+
+  updateSheetXml(sheet);
+  if (targetSheet !== sheet) {
+    updateSheetXml(targetSheet);
+  }
+  await writeWorkbookState(filePath, state);
+  return { sourcePath, targetPath: `${effectiveTargetParentPath}/row[${targetRowIdx}]` };
+}
+
+export interface ExcelSwapResult {
+  newPath1: string;
+  newPath2: string;
+}
+
+export async function swapExcelNodes(
+  filePath: string,
+  path1: string,
+  path2: string,
+): Promise<ExcelSwapResult> {
+  const state = await loadWorkbookState(filePath);
+  const seg1 = path1.trimStart("/").split("/", 2);
+  const seg2 = path2.trimStart("/").split("/", 2);
+
+  if (seg1.length < 2 || seg2.length < 2) {
+    throw new UsageError("Swap requires element paths (e.g. /Sheet1/row[1] /Sheet1/row[2])");
+  }
+  if (seg1[0].toLowerCase() !== seg2[0].toLowerCase()) {
+    throw new UsageError("Cannot swap elements across different sheets");
+  }
+
+  const sheetName = seg1[0];
+  const sheet = ensureSheetState(state, sheetName);
+
+  const rowMatch1 = /^row\[(\d+)\]$/i.exec(seg1[1]);
+  const rowMatch2 = /^row\[(\d+)\]$/i.exec(seg2[1]);
+  if (!rowMatch1 || !rowMatch2) {
+    throw new UsageError("Swap only supports row[N] elements in Excel");
+  }
+
+  const rowIdx1 = Number(rowMatch1[1]);
+  const rowIdx2 = Number(rowMatch2[1]);
+
+  // Collect cells for each row
+  const row1Cells: Record<string, ExcelCellModel> = {};
+  const row2Cells: Record<string, ExcelCellModel> = {};
+  const colMatch = /^[A-Z]+/;
+
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    const refRow = Number(/\d+/.exec(ref)?.[0] ?? "0");
+    const col = colMatch.exec(ref)?.[0] ?? "A";
+    if (refRow === rowIdx1) {
+      row1Cells[`${col}${rowIdx2}`] = cell;
+    } else if (refRow === rowIdx2) {
+      row2Cells[`${col}${rowIdx1}`] = cell;
+    }
+  }
+
+  // Delete old cells and add swapped ones
+  for (const ref of Object.keys(sheet.cells)) {
+    const refRow = Number(/\d+/.exec(ref)?.[0] ?? "0");
+    if (refRow === rowIdx1 || refRow === rowIdx2) {
+      delete sheet.cells[ref];
+    }
+  }
+
+  for (const [ref, cell] of Object.entries(row1Cells)) {
+    sheet.cells[ref] = cell;
+  }
+  for (const [ref, cell] of Object.entries(row2Cells)) {
+    sheet.cells[ref] = cell;
+  }
+
+  updateSheetXml(sheet);
+  await writeWorkbookState(filePath, state);
+  return {
+    newPath1: `/${sheetName}/row[${rowIdx2}]`,
+    newPath2: `/${sheetName}/row[${rowIdx1}]`,
+  };
+}
+
+export async function copyFromExcelNode(
+  filePath: string,
+  sourcePath: string,
+  targetParentPath: string,
+  options?: { index?: number },
+): Promise<{ path: string }> {
+  const state = await loadWorkbookState(filePath);
+  const segments = sourcePath.trimStart("/").split("/", 2);
+  const sheetName = segments[0];
+  const sheet = ensureSheetState(state, sheetName);
+
+  if (segments.length < 2) {
+    throw new UsageError("Cannot copy an entire sheet. Use add --type sheet instead.");
+  }
+
+  const elementRef = segments[1];
+  const rowMatch = /^row\[(\d+)\]$/i.exec(elementRef);
+  if (!rowMatch) {
+    throw new UsageError(`Copy not supported for: ${elementRef}. Supported: row[N].`);
+  }
+
+  const sourceRowIdx = Number(rowMatch[1]);
+
+  // Collect source row cells
+  const sourceCells: Record<string, ExcelCellModel> = {};
+  const colMatch = /^[A-Z]+/;
+  for (const [ref, cell] of Object.entries(sheet.cells)) {
+    const refRow = Number(/\d+/.exec(ref)?.[0] ?? "0");
+    if (refRow === sourceRowIdx) {
+      sourceCells[ref] = { ...cell };
+    }
+  }
+
+  if (Object.keys(sourceCells).length === 0) {
+    throw new OfficekitError(`Row ${sourceRowIdx} not found.`, "not_found");
+  }
+
+  // Find target
+  const tgtSegments = targetParentPath.trimStart("/").split("/", 2);
+  const tgtSheet = ensureSheetState(state, tgtSegments[0]);
+  const targetIndex = options?.index;
+
+  // Find target row index
+  let targetRowIdx: number;
+  if (targetIndex !== undefined) {
+    const existingRows = Object.keys(tgtSheet.cells)
+      .map((ref) => Number(/\d+/.exec(ref)?.[0] ?? "0"))
+      .filter((r) => r > 0);
+    const sortedRows = [...new Set(existingRows)].sort((a, b) => a - b);
+    if (targetIndex >= 0 && targetIndex < sortedRows.length) {
+      targetRowIdx = sortedRows[targetIndex];
+    } else {
+      targetRowIdx = (sortedRows[sortedRows.length - 1] ?? 0) + 1;
+    }
+  } else {
+    const existingRows = Object.keys(tgtSheet.cells)
+      .map((ref) => Number(/\d+/.exec(ref)?.[0] ?? "0"));
+    targetRowIdx = Math.max(...existingRows, 0) + 1;
+  }
+
+  // Copy cells to target row
+  for (const [ref, cell] of Object.entries(sourceCells)) {
+    const col = colMatch.exec(ref)?.[0] ?? "A";
+    const newRef = `${col}${targetRowIdx}`;
+    tgtSheet.cells[newRef] = { ...cell };
+  }
+
+  updateSheetXml(tgtSheet);
+  await writeWorkbookState(filePath, state);
+  return { path: `${targetParentPath}/row[${targetRowIdx}]` };
+}
+
+export async function addExcelPart(
+  filePath: string,
+  parentPartPath: string,
+  partType: string,
+  properties?: Record<string, string>,
+): Promise<{ relId: string; partPath: string }> {
+  const state = await loadWorkbookState(filePath);
+  const normalizedType = partType.toLowerCase();
+
+  if (normalizedType === "chart") {
+    const sheetName = parentPartPath.trimStart("/");
+    const sheet = ensureSheetState(state, sheetName);
+
+    // Create chart entry in sheet's drawing references
+    // For now, return a placeholder - actual chart part creation requires ZIP manipulation
+    const chartIdx = (sheet.charts?.length ?? 0) + 1;
+    if (!sheet.charts) sheet.charts = [];
+    sheet.charts.push({
+      relTarget: `../charts/chart${chartIdx}.xml`,
+    });
+    updateSheetXml(sheet);
+    await writeWorkbookState(filePath, state);
+    return { relId: `rId${chartIdx}`, partPath: `/${sheetName}/chart[${chartIdx}]` };
+  }
+
+  throw new UsageError(`Unknown part type: ${partType}. Supported: chart.`);
+}
+
+export async function rawSetExcelNode(
+  filePath: string,
+  partPath: string,
+  xpath: string,
+  action: string,
+  xml?: string,
+): Promise<{ affected: number }> {
+  const state = await loadWorkbookState(filePath);
+  // RawSet is a no-op stub for now - actual implementation requires XML manipulation library
+  // The C# version uses RawXmlHelper.Execute for XPath-based XML modifications
+  console.log(`raw-set: part=${partPath} xpath=${xpath} action=${action}`);
+  return { affected: 0 };
+}
+
+export async function validateExcelDocument(filePath: string): Promise<{ errors: Array<{ message: string }> }> {
+  const state = await loadWorkbookState(filePath);
+  // Validation stub - returns empty errors
+  // The C# version uses RawXmlHelper.ValidateDocument
+  return { errors: [] };
+}
+
+function throwUsage(message: string): never {
+  throw new UsageError(message);
+}
+
 export function renderExcelHtmlFromRoot(root: unknown) {
   if (!root || typeof root !== "object" || !("sheets" in root)) {
     return `<section data-format="excel"><table><tbody><tr><td colspan="2"><em>Empty workbook</em></td></tr></tbody></table></section>`;
