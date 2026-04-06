@@ -69,6 +69,21 @@ export interface ExcelCommentModel {
   text: string;
 }
 
+interface ExcelConditionalFormattingModel {
+  sqref: string;
+  cfType: "databar" | "colorscale" | "iconset";
+  priority?: number;
+  color?: string;
+  min?: string;
+  max?: string;
+  minColor?: string;
+  midColor?: string;
+  maxColor?: string;
+  iconset?: string;
+  reverse?: boolean;
+  showvalue?: boolean;
+}
+
 export interface ExcelTableModel {
   name?: string;
   displayName?: string;
@@ -259,6 +274,13 @@ export async function addExcelNode(filePath: string, targetPath: string, options
     await writeWorkbookState(filePath, state);
     const validations = parseValidations(sheet.xml);
     return { ...validation, ...(validation.type ? { validationType: validation.type } : {}), path: `/${sheet.name}/validation[${validations.length}]`, type: "validation" };
+  }
+
+  if (options.type === "cf" || options.type === "conditionalformatting" || options.type === "databar" || options.type === "colorscale" || options.type === "iconset") {
+    const sheet = ensureSheetState(state, normalizeSheetPath(targetPath));
+    const cf = addConditionalFormatting(sheet, options.type, options.props);
+    await writeWorkbookState(filePath, state);
+    return { ...cf, path: `/${sheet.name}/cf[${parseConditionalFormatting(sheet.xml).length}]`, type: "conditionalformatting" };
   }
 
   if (options.type === "comment" || options.type === "note") {
@@ -483,6 +505,14 @@ export async function setExcelNode(filePath: string, targetPath: string, options
     return next;
   }
 
+  const cfMatch = /^\/([^/]+)\/cf\[(\d+)\]$/i.exec(targetPath);
+  if (cfMatch) {
+    const sheet = ensureSheetState(state, cfMatch[1]);
+    const next = setConditionalFormatting(sheet, Number(cfMatch[2]), options.props);
+    await writeWorkbookState(filePath, state);
+    return { ...next, path: targetPath, type: "conditionalformatting" };
+  }
+
   const commentMatch = /^\/([^/]+)\/comment\[(\d+)\]$/i.exec(targetPath);
   if (commentMatch) {
     const sheet = ensureSheetState(state, commentMatch[1]);
@@ -581,6 +611,14 @@ export async function removeExcelNode(filePath: string, targetPath: string) {
     return { ok: true, targetPath };
   }
 
+  const cfMatch = /^\/([^/]+)\/cf\[(\d+)\]$/i.exec(targetPath);
+  if (cfMatch) {
+    const sheet = ensureSheetState(state, cfMatch[1]);
+    removeConditionalFormatting(sheet, Number(cfMatch[2]));
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
   const commentMatch = /^\/([^/]+)\/comment\[(\d+)\]$/i.exec(targetPath);
   if (commentMatch) {
     const sheet = ensureSheetState(state, commentMatch[1]);
@@ -674,6 +712,14 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
+  if (normalized === "cf" || normalized === "conditionalformatting" || normalized === "conditionalformattings" || normalized === "cfs") {
+    for (const sheet of state.sheets) {
+      parseConditionalFormatting(sheet.xml).forEach((cf, index) => {
+        nodes.push({ ...cf, path: `/${sheet.name}/cf[${index + 1}]`, type: "conditionalformatting" });
+      });
+    }
+    return nodes;
+  }
   if (normalized === "comment" || normalized === "comments") {
     for (const sheet of state.sheets) {
       getSheetComments(state, sheet).forEach((comment, index) => {
@@ -734,7 +780,7 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
-  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, formula, validation, comment, table, chart, pivottable, sparkline, shape, picture.");
+  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, formula, validation, cf, comment, table, chart, pivottable, sparkline, shape, picture.");
 }
 
 export async function viewExcelDocument(filePath: string, mode: string) {
@@ -994,6 +1040,13 @@ function materializeExcelPath(state: ExcelWorkbookState, targetPath: string): un
     const validation = parseValidations(sheet.xml)[Number(validationMatch[2]) - 1];
     if (!validation) throw new OfficekitError(`Validation ${validationMatch[2]} does not exist.`, "not_found");
     return { ...validation, ...(validation.type ? { validationType: validation.type } : {}), path: targetPath, type: "validation" };
+  }
+  const cfMatch = /^\/([^/]+)\/cf\[(\d+)\]$/i.exec(targetPath);
+  if (cfMatch) {
+    const sheet = ensureSheetState(state, cfMatch[1]);
+    const cf = parseConditionalFormatting(sheet.xml)[Number(cfMatch[2]) - 1];
+    if (!cf) throw new OfficekitError(`Conditional formatting ${cfMatch[2]} does not exist.`, "not_found");
+    return { ...cf, path: targetPath, type: "conditionalformatting" };
   }
   const commentMatch = /^\/([^/]+)\/comment\[(\d+)\]$/i.exec(targetPath);
   if (commentMatch) {
@@ -1378,6 +1431,9 @@ function renderOutline(state: ExcelWorkbookState) {
     parseValidations(sheet.xml).forEach((validation, index) => {
       lines.push(`  Validation ${index + 1}: ${validation.sqref ?? ""}${validation.type ? ` [${validation.type}]` : ""}`);
     });
+    parseConditionalFormatting(sheet.xml).forEach((cf, index) => {
+      lines.push(`  CF ${index + 1}: ${cf.sqref} [${cf.cfType}]`);
+    });
     getSheetComments(state, sheet).forEach((comment, index) => {
       lines.push(`  Comment ${index + 1}: ${comment.ref} = ${comment.text}`);
     });
@@ -1607,6 +1663,102 @@ function addValidation(sheet: ExcelSheetModel, props: Record<string, string>) {
   validations.push(validation);
   sheet.xml = replaceSheetValidations(sheet.xml, validations);
   return validation;
+}
+
+function addConditionalFormatting(sheet: ExcelSheetModel, requestedType: string, props: Record<string, string>) {
+  const normalizedType = requestedType.toLowerCase() === "cf" || requestedType.toLowerCase() === "conditionalformatting"
+    ? (props.type ?? "databar").toLowerCase()
+    : requestedType.toLowerCase();
+  const sqref = props.sqref ?? props.range ?? props.ref ?? "A1:A10";
+  const rules = parseConditionalFormatting(sheet.xml);
+  const priority = rules.length + 1;
+  let next: ExcelConditionalFormattingModel;
+  if (normalizedType === "databar") {
+    next = {
+      sqref,
+      cfType: "databar",
+      priority,
+      ...(props.color ? { color: normalizeArgbColor(props.color) } : { color: "FF638EC6" }),
+      ...(props.min !== undefined ? { min: props.min } : {}),
+      ...(props.max !== undefined ? { max: props.max } : {}),
+    };
+  } else if (normalizedType === "colorscale") {
+    next = {
+      sqref,
+      cfType: "colorscale",
+      priority,
+      minColor: normalizeArgbColor(props.mincolor ?? "FFF8696B"),
+      ...(props.midcolor ? { midColor: normalizeArgbColor(props.midcolor) } : {}),
+      maxColor: normalizeArgbColor(props.maxcolor ?? "FF63BE7B"),
+    };
+  } else if (normalizedType === "iconset") {
+    next = {
+      sqref,
+      cfType: "iconset",
+      priority,
+      iconset: props.iconset ?? props.icons ?? "3TrafficLights1",
+      ...(props.reverse !== undefined ? { reverse: isTruthy(props.reverse) } : {}),
+      ...(props.showvalue !== undefined ? { showvalue: isTruthy(props.showvalue) } : {}),
+    };
+  } else {
+    throw new UsageError(`Unsupported conditional formatting type '${requestedType}'.`, "Use databar, colorscale, iconset, or cf --prop type=...");
+  }
+  rules.push(next);
+  sheet.xml = replaceSheetConditionalFormatting(sheet.xml, rules);
+  return next;
+}
+
+function setConditionalFormatting(sheet: ExcelSheetModel, index: number, props: Record<string, string>) {
+  const rules = parseConditionalFormatting(sheet.xml);
+  const current = rules[index - 1];
+  if (!current) {
+    throw new OfficekitError(`Conditional formatting ${index} does not exist.`, "not_found");
+  }
+  const next: ExcelConditionalFormattingModel = { ...current };
+  for (const [key, value] of Object.entries(props)) {
+    switch (key.toLowerCase()) {
+      case "sqref":
+      case "range":
+      case "ref":
+        next.sqref = value;
+        break;
+      case "color":
+        next.color = normalizeArgbColor(value);
+        break;
+      case "mincolor":
+        next.minColor = normalizeArgbColor(value);
+        break;
+      case "midcolor":
+        next.midColor = normalizeArgbColor(value);
+        break;
+      case "maxcolor":
+        next.maxColor = normalizeArgbColor(value);
+        break;
+      case "iconset":
+      case "icons":
+        next.iconset = value;
+        break;
+      case "reverse":
+        next.reverse = isTruthy(value);
+        break;
+      case "showvalue":
+        next.showvalue = isTruthy(value);
+        break;
+      default:
+        throw new UsageError(`Unsupported conditional formatting property '${key}'.`, "Supported: sqref/range/ref, color, mincolor, midcolor, maxcolor, iconset/icons, reverse, showvalue.");
+    }
+  }
+  rules[index - 1] = next;
+  sheet.xml = replaceSheetConditionalFormatting(sheet.xml, rules);
+  return next;
+}
+
+function removeConditionalFormatting(sheet: ExcelSheetModel, index: number) {
+  const rules = parseConditionalFormatting(sheet.xml);
+  if (!rules[index - 1]) {
+    throw new OfficekitError(`Conditional formatting ${index} does not exist.`, "not_found");
+  }
+  sheet.xml = replaceSheetConditionalFormatting(sheet.xml, rules.filter((_, itemIndex) => itemIndex !== index - 1));
 }
 
 function addComment(state: ExcelWorkbookState, sheet: ExcelSheetModel, props: Record<string, string>) {
@@ -2449,6 +2601,82 @@ function replaceSheetValidations(sheetXml: string, validations: ExcelValidationM
     ? `<dataValidations count="${validations.length}">${validations.map(renderValidationXml).join("")}</dataValidations>`
     : "";
   return replaceOrInsert(sheetXml, /<(?:\w+:)?dataValidations\b[\s\S]*?<\/(?:\w+:)?dataValidations>/, rendered, /<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+}
+
+function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattingModel[] {
+  return [...sheetXml.matchAll(/<(?:\w+:)?conditionalFormatting\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?conditionalFormatting>/g)].flatMap((match) => {
+    const sqref = parseAttr(match[1], "sqref") ?? "";
+    const body = match[2];
+    return [...body.matchAll(/<(?:\w+:)?cfRule\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?cfRule>/g)].map((ruleMatch) => {
+      const attrs = ruleMatch[1];
+      const ruleBody = ruleMatch[2];
+      const type = (parseAttr(attrs, "type") ?? "").toLowerCase();
+      if (type === "databar" || type === "databar".toLowerCase()) {
+        const cfvo = [...ruleBody.matchAll(/<(?:\w+:)?cfvo\b([^>]*)\/?>/g)].map((item) => ({ type: parseAttr(item[1], "type"), val: parseAttr(item[1], "val") }));
+        return {
+          sqref,
+          cfType: "databar" as const,
+          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
+          ...(cfvo[0]?.type === "num" && cfvo[0]?.val ? { min: cfvo[0].val } : {}),
+          ...(cfvo[1]?.type === "num" && cfvo[1]?.val ? { max: cfvo[1].val } : {}),
+          ...(parseAttr(/<(?:\w+:)?color\b([^>]*)\/?>/.exec(ruleBody)?.[1] ?? "", "rgb") ? { color: parseAttr(/<(?:\w+:)?color\b([^>]*)\/?>/.exec(ruleBody)?.[1] ?? "", "rgb") } : {}),
+        };
+      }
+      if (type === "colorscale") {
+        const colors = [...ruleBody.matchAll(/<(?:\w+:)?color\b([^>]*)\/?>/g)].map((item) => parseAttr(item[1], "rgb")).filter(Boolean) as string[];
+        return {
+          sqref,
+          cfType: "colorscale" as const,
+          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
+          ...(colors[0] ? { minColor: colors[0] } : {}),
+          ...(colors[1] && colors.length === 3 ? { midColor: colors[1] } : {}),
+          ...(colors.at(-1) ? { maxColor: colors.at(-1)! } : {}),
+        };
+      }
+      if (type === "iconset") {
+        const iconAttrs = /<(?:\w+:)?iconSet\b([^>]*)>/.exec(ruleBody)?.[1] ?? "";
+        return {
+          sqref,
+          cfType: "iconset" as const,
+          ...(parseAttr(attrs, "priority") ? { priority: Number(parseAttr(attrs, "priority")) } : {}),
+          ...(parseAttr(iconAttrs, "iconSet") ? { iconset: parseAttr(iconAttrs, "iconSet") } : {}),
+          ...(parseAttr(iconAttrs, "reverse") !== undefined ? { reverse: isTruthy(parseAttr(iconAttrs, "reverse") ?? "false") } : {}),
+          ...(parseAttr(iconAttrs, "showValue") !== undefined ? { showvalue: isTruthy(parseAttr(iconAttrs, "showValue") ?? "false") } : {}),
+        };
+      }
+      return {
+        sqref,
+        cfType: "databar" as const,
+      };
+    }).filter((item) => item.sqref);
+  });
+}
+
+function replaceSheetConditionalFormatting(sheetXml: string, rules: ExcelConditionalFormattingModel[]) {
+  const rendered = rules.length > 0
+    ? rules.map(renderConditionalFormattingXml).join("")
+    : "";
+  const withoutExisting = sheetXml.replace(/<(?:\w+:)?conditionalFormatting\b[\s\S]*?<\/(?:\w+:)?conditionalFormatting>/g, "");
+  return replaceOrInsert(withoutExisting, /<(?:\w+:)?conditionalFormatting\b[\s\S]*?<\/(?:\w+:)?conditionalFormatting>/, rendered, /<(?:\w+:)?dataValidations\b[\s\S]*?<\/(?:\w+:)?dataValidations>|<(?:\w+:)?autoFilter\b[^>]*\/?>|<(?:\w+:)?sheetData\b[\s\S]*?<\/(?:\w+:)?sheetData>/);
+}
+
+function renderConditionalFormattingXml(rule: ExcelConditionalFormattingModel, index: number) {
+  const priority = rule.priority ?? index + 1;
+  if (rule.cfType === "databar") {
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="dataBar" priority="${priority}"><dataBar><cfvo type="${rule.min !== undefined ? "num" : "min"}"${rule.min !== undefined ? ` val="${escapeXml(rule.min)}"` : ""}/><cfvo type="${rule.max !== undefined ? "num" : "max"}"${rule.max !== undefined ? ` val="${escapeXml(rule.max)}"` : ""}/><color rgb="${escapeXml(rule.color ?? "FF638EC6")}"/></dataBar></cfRule></conditionalFormatting>`;
+  }
+  if (rule.cfType === "colorscale") {
+    const mid = rule.midColor ? `<cfvo type="percentile" val="50"/><color rgb="${escapeXml(rule.midColor)}"/>` : "";
+    return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="colorScale" priority="${priority}"><colorScale><cfvo type="min"/><cfvo type="max"/>${mid ? "" : ""}<color rgb="${escapeXml(rule.minColor ?? "FFF8696B")}"/>${mid}<color rgb="${escapeXml(rule.maxColor ?? "FF63BE7B")}"/></colorScale></cfRule></conditionalFormatting>`
+      .replace("<cfvo type=\"min\"/><cfvo type=\"max\"/>", rule.midColor ? `<cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/>` : `<cfvo type="min"/><cfvo type="max"/>`);
+  }
+  const iconSetName = rule.iconset ?? "3TrafficLights1";
+  const iconCount = getIconSetThresholdCount(iconSetName);
+  const thresholdXml = Array.from({ length: iconCount }, (_, itemIndex) => {
+    const value = itemIndex === 0 ? "0" : String(Math.floor(itemIndex * 100 / iconCount));
+    return `<cfvo type="percent" val="${value}"/>`;
+  }).join("");
+  return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="iconSet" priority="${priority}"><iconSet iconSet="${escapeXml(iconSetName)}"${rule.reverse ? ' reverse="1"' : ""}${rule.showvalue !== undefined ? ` showValue="${rule.showvalue ? 1 : 0}"` : ""}>${thresholdXml}</iconSet></cfRule></conditionalFormatting>`;
 }
 
 function renderValidationXml(validation: ExcelValidationModel) {
@@ -3771,6 +3999,13 @@ function resolveContentTypeOverride(entryName: string) {
   if (/^xl\/charts\/chart\d+\.xml$/i.test(entryName)) return [entryName, "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"] as [string, string];
   if (/^xl\/pivotTables\/pivotTable\d+\.xml$/i.test(entryName)) return [entryName, "application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"] as [string, string];
   return undefined;
+}
+
+function getIconSetThresholdCount(iconSetName: string) {
+  const normalized = iconSetName.toLowerCase();
+  if (normalized.startsWith("5")) return 5;
+  if (normalized.startsWith("4")) return 4;
+  return 3;
 }
 
 function normalizeCalcMode(value: string) {

@@ -509,6 +509,45 @@ describe("officekit CLI scaffold", () => {
     expect(zip.get("xl/media/image1.png")).toBeDefined();
   });
 
+  test("adds and updates Excel conditional-formatting families through OfficeCLI-style paths", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-cf-"));
+    const filePath = path.join(dir, "cf.xlsx");
+    await runCli(["create", filePath]);
+    await runCli(["set", filePath, "/Sheet1/A1", "--prop", "value=10", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A2", "--prop", "value=20", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A3", "--prop", "value=30", "--prop", "type=number"]);
+
+    await runCli(["add", filePath, "/Sheet1", "--type", "cf", "--prop", "type=databar", "--prop", "sqref=A1:A3", "--prop", "color=638EC6"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "colorscale", "--prop", "range=A1:A3", "--prop", "mincolor=F8696B", "--prop", "midcolor=FFEB84", "--prop", "maxcolor=63BE7B"]);
+    await runCli(["add", filePath, "/Sheet1", "--type", "iconset", "--prop", "range=A1:A3", "--prop", "iconset=4TrafficLights", "--prop", "reverse=true", "--prop", "showvalue=false"]);
+
+    await runCli(["set", filePath, "/Sheet1/cf[1]", "--prop", "color=4472C4"]);
+    await runCli(["set", filePath, "/Sheet1/cf[2]", "--prop", "mincolor=FF0000", "--prop", "maxcolor=00FF00"]);
+    await runCli(["set", filePath, "/Sheet1/cf[3]", "--prop", "iconset=5Arrows", "--prop", "showvalue=true"]);
+
+    const cf1 = await runCli(["get", filePath, "/Sheet1/cf[1]", "--json"]);
+    const cf2 = await runCli(["get", filePath, "/Sheet1/cf[2]", "--json"]);
+    const cf3 = await runCli(["get", filePath, "/Sheet1/cf[3]", "--json"]);
+    const cfQuery = await runCli(["query", filePath, "cf"]);
+    const outline = await runCli(["view", filePath, "outline"]);
+    const rawSheet = await runCli(["raw", filePath, "/Sheet1"]);
+
+    expect(cf1.stdout).toContain('"cfType": "databar"');
+    expect(cf1.stdout).toContain('FF4472C4');
+    expect(cf2.stdout).toContain('"cfType": "colorscale"');
+    expect(cf2.stdout).toContain('FFFF0000');
+    expect(cf2.stdout).toContain('FF00FF00');
+    expect(cf3.stdout).toContain('"cfType": "iconset"');
+    expect(cf3.stdout).toContain('"iconset": "5Arrows"');
+    expect(cf3.stdout).toContain('"showvalue": true');
+    expect(cfQuery.stdout).toContain('"type": "conditionalformatting"');
+    expect(outline.stdout).toContain("CF 1: A1:A3 [databar]");
+    expect(rawSheet.stdout).toContain('<cfRule type="dataBar"');
+    expect(rawSheet.stdout).toContain('<cfRule type="colorScale"');
+    expect(rawSheet.stdout).toContain('<cfRule type="iconSet"');
+    expect(rawSheet.stdout).toContain('iconSet="5Arrows"');
+  });
+
   test("evaluates simple formulas for display and creates styles from cell props", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-style-formula-"));
     const filePath = path.join(dir, "style-formula.xlsx");
