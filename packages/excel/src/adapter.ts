@@ -2764,7 +2764,7 @@ function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattin
         return {
           ...common,
           cfType: "formula" as const,
-          ...(extractTagText(ruleBody, "formula") ? { formula: extractTagText(ruleBody, "formula") } : {}),
+          ...(extractTagText(ruleBody, "formula") ? { formula: decodeXmlRecursive(extractTagText(ruleBody, "formula")!) } : {}),
         };
       }
       if (type === "top10") {
@@ -2793,15 +2793,15 @@ function parseConditionalFormatting(sheetXml: string): ExcelConditionalFormattin
         return {
           ...common,
           cfType: "containstext" as const,
-          ...(parseAttr(attrs, "text") ? { text: parseAttr(attrs, "text") } : {}),
-          ...(extractTagText(ruleBody, "formula") ? { formula: extractTagText(ruleBody, "formula") } : {}),
+          ...(parseAttr(attrs, "text") ? { text: decodeXml(parseAttr(attrs, "text") ?? "") } : {}),
+          ...(extractTagText(ruleBody, "formula") ? { formula: decodeXmlRecursive(extractTagText(ruleBody, "formula")!) } : {}),
         };
       }
       if (type === "timeperiod") {
         return {
           ...common,
           cfType: "dateoccurring" as const,
-          ...(parseAttr(attrs, "timePeriod") ? { period: parseAttr(attrs, "timePeriod") } : {}),
+          ...(parseAttr(attrs, "timePeriod") ? { period: decodeXml(parseAttr(attrs, "timePeriod") ?? "") } : {}),
         };
       }
       return {
@@ -2860,89 +2860,6 @@ function renderConditionalFormattingXml(rule: ExcelConditionalFormattingModel, i
     return `<cfvo type="percent" val="${value}"/>`;
   }).join("");
   return `<conditionalFormatting sqref="${escapeXml(rule.sqref)}"><cfRule type="iconSet" priority="${priority}"${rule.dxfId !== undefined ? ` dxfId="${rule.dxfId}"` : ""}><iconSet iconSet="${escapeXml(iconSetName)}"${rule.reverse ? ' reverse="1"' : ""}${rule.showvalue !== undefined ? ` showValue="${rule.showvalue ? 1 : 0}"` : ""}>${thresholdXml}</iconSet></cfRule></conditionalFormatting>`;
-}
-
-function isConditionalFormattingStyleKey(key: string) {
-  const lower = key.toLowerCase();
-  return lower === "fontcolor"
-    || lower === "fill"
-    || lower === "fontbold"
-    || lower === "bold"
-    || lower === "color";
-}
-
-function hasConditionalFormattingStyleProps(props: Record<string, string>) {
-  return Object.keys(props).some((key) => isConditionalFormattingStyleKey(key));
-}
-
-function extractConditionalFormattingStyleProps(props: Record<string, string>) {
-  return {
-    ...(props.fontColor ?? props.fontcolor ? { fontColor: normalizeArgbColor(props.fontColor ?? props.fontcolor ?? "") } : {}),
-    ...(props.fill ? { fill: normalizeArgbColor(props.fill) } : {}),
-    ...(props.fontBold !== undefined || props.fontbold !== undefined || props.bold !== undefined
-      ? { fontBold: isTruthy(props.fontBold ?? props.fontbold ?? props.bold ?? "false") }
-      : {}),
-  };
-}
-
-function serializeConditionalFormattingStyleProps(rule: ExcelConditionalFormattingModel): Record<string, string> {
-  return {
-    ...(rule.fontColor ? { fontColor: rule.fontColor } : {}),
-    ...(rule.fill ? { fill: rule.fill } : {}),
-    ...(rule.fontBold !== undefined ? { fontBold: String(rule.fontBold) } : {}),
-  };
-}
-
-function registerDifferentialFormat(state: ExcelWorkbookState, props: Record<string, string>) {
-  const dxfXml = renderDifferentialFormatXml(extractConditionalFormattingStyleProps(props));
-  const existing = parseDifferentialFormats(state.styleSheetXml ?? buildDefaultStylesheetXml());
-  const found = existing.findIndex((item) => item === dxfXml);
-  if (found >= 0) {
-    return found;
-  }
-  const next = [...existing, dxfXml];
-  state.styleSheetXml = replaceDifferentialFormats(state.styleSheetXml ?? buildDefaultStylesheetXml(), next);
-  return next.length - 1;
-}
-
-function parseDifferentialFormats(xml: string) {
-  const body = /<dxfs\b[^>]*>([\s\S]*?)<\/dxfs>/.exec(xml)?.[1] ?? "";
-  return [...body.matchAll(/<dxf\b[\s\S]*?<\/dxf>/g)].map((match) => match[0]);
-}
-
-function replaceDifferentialFormats(xml: string, dxfs: string[]) {
-  const rendered = dxfs.length > 0 ? `<dxfs count="${dxfs.length}">${dxfs.join("")}</dxfs>` : "";
-  if (/<dxfs\b[\s\S]*?<\/dxfs>/.test(xml)) {
-    return xml.replace(/<dxfs\b[\s\S]*?<\/dxfs>/, rendered);
-  }
-  return xml.replace(/<\/styleSheet>/, `${rendered}</styleSheet>`);
-}
-
-function renderDifferentialFormatXml(style: { fontColor?: string; fill?: string; fontBold?: boolean }) {
-  const fontXml = style.fontColor || style.fontBold
-    ? `<font>${style.fontBold ? "<b/>" : ""}${style.fontColor ? `<color rgb="${escapeXml(style.fontColor)}"/>` : ""}</font>`
-    : "";
-  const fillXml = style.fill
-    ? `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(style.fill)}"/><bgColor indexed="64"/></patternFill></fill>`
-    : "";
-  return `<dxf>${fontXml}${fillXml}</dxf>`;
-}
-
-function normalizeTimePeriod(value: string) {
-  const normalized = value.trim().toLowerCase();
-  const allowed = new Set([
-    "today",
-    "yesterday",
-    "tomorrow",
-    "last7days",
-    "lastmonth",
-    "thismonth",
-    "nextmonth",
-    "lastweek",
-    "thisweek",
-    "nextweek",
-  ]);
-  return allowed.has(normalized) ? normalized : "today";
 }
 
 function renderValidationXml(validation: ExcelValidationModel) {
@@ -3294,50 +3211,6 @@ function registerStyle(state: ExcelWorkbookState, props: Record<string, string>)
   const xfId = ensureFragment(stylesheet.cellXfs, xfXml, `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`);
   state.styleSheetXml = serializeStylesheet(stylesheet);
   return xfId;
-}
-
-function hasConditionalFormattingStyleProps(props: Record<string, string>) {
-  return Object.keys(props).some((key) => isConditionalFormattingStyleKey(key));
-}
-
-function isConditionalFormattingStyleKey(key: string) {
-  const lower = key.toLowerCase();
-  return lower === "font.color"
-    || lower === "font.bold"
-    || lower === "fill"
-    || lower === "bgcolor"
-    || lower === "bgcolor";
-}
-
-function extractConditionalFormattingStyleProps(props: Record<string, string>) {
-  const next: Partial<ExcelConditionalFormattingModel> = {};
-  if (props["font.color"] !== undefined) {
-    next.fontColor = normalizeArgbColor(props["font.color"]);
-  }
-  if (props["font.bold"] !== undefined) {
-    next.fontBold = isTruthy(props["font.bold"]);
-  }
-  if (props.fill !== undefined || props.bgColor !== undefined || props.bgcolor !== undefined) {
-    next.fillColor = normalizeArgbColor(props.fill ?? props.bgColor ?? props.bgcolor ?? "");
-  }
-  return next;
-}
-
-function serializeConditionalFormattingStyleProps(rule: Partial<ExcelConditionalFormattingModel>) {
-  return {
-    ...(rule.fontColor ? { "font.color": rule.fontColor } : {}),
-    ...(rule.fontBold !== undefined ? { "font.bold": String(rule.fontBold) } : {}),
-    ...(rule.fillColor ? { fill: rule.fillColor } : {}),
-  };
-}
-
-function registerDifferentialFormat(state: ExcelWorkbookState, props: Record<string, string>) {
-  const stylesheet = parseStylesheet(state.styleSheetXml ?? buildDefaultStylesheetXml());
-  const dxfXml = buildDifferentialFormatXml(props);
-  const existing = stylesheet.dxfs.findIndex((item) => item === dxfXml);
-  const dxfId = existing >= 0 ? existing : stylesheet.dxfs.push(dxfXml) - 1;
-  state.styleSheetXml = serializeStylesheet(stylesheet);
-  return dxfId;
 }
 
 function normalizeExcelCell(cell: ExcelCellModel | undefined): ExcelCellModel {
@@ -4167,6 +4040,18 @@ function decodeXml(value: string) {
     .replaceAll("&amp;", "&");
 }
 
+function decodeXmlRecursive(value: string) {
+  let current = value;
+  for (let index = 0; index < 5; index += 1) {
+    const next = decodeXml(current);
+    if (next === current) {
+      return next;
+    }
+    current = next;
+  }
+  return current;
+}
+
 function normalizeZipPath(baseDir: string, target: string) {
   const normalized = target.replace(/\\/g, "/");
   if (normalized.startsWith("/")) return path.posix.normalize(normalized.slice(1));
@@ -4422,23 +4307,6 @@ function normalizeCalcMode(value: string) {
 function normalizeRefMode(value: string) {
   const normalized = value.trim().toUpperCase();
   return normalized === "R1C1" ? "R1C1" : "A1";
-}
-
-function normalizeTimePeriod(value: string) {
-  const normalized = value.trim().toLowerCase();
-  const allowed = new Set([
-    "today",
-    "yesterday",
-    "tomorrow",
-    "last7days",
-    "lastweek",
-    "thisweek",
-    "nextweek",
-    "lastmonth",
-    "thismonth",
-    "nextmonth",
-  ]);
-  return allowed.has(normalized) ? normalized : "today";
 }
 
 function normalizeArgbColor(value: string) {
