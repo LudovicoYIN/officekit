@@ -3394,12 +3394,19 @@ function evaluateFormulaExpression(
     TRUE: () => 1,
     FALSE: () => 0,
     MEDIAN: (args) => evaluateMedianFormula(state, args, sheet, visited),
+    ISBLANK: (args) => evaluateIsBlankFormula(state, args, sheet),
+    ISNUMBER: (args) => evaluateIsNumberFormula(state, args, sheet),
+    ISTEXT: (args) => evaluateIsTextFormula(state, args, sheet),
+    ISERROR: (args) => evaluateIsErrorFormula(state, args, sheet),
+    ISNA: (args) => evaluateIsNaFormula(state, args, sheet),
+    ISEVEN: (args) => evaluateIsEvenOddFormula(state, args, sheet, true),
+    ISODD: (args) => evaluateIsEvenOddFormula(state, args, sheet, false),
   };
 
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|ABS|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|MEDIAN|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISEVEN|ISODD|ABS|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -3906,6 +3913,54 @@ function evaluateMedianFormula(state: ExcelWorkbookState | undefined, args: stri
   const sorted = values.slice().sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function resolveCellRef(arg: string, sheet: ExcelSheetModel) {
+  const trimmed = arg.trim();
+  if (/^[A-Z]+[0-9]+$/i.test(trimmed)) {
+    return sheet.cells[trimmed.toUpperCase()];
+  }
+  return undefined;
+}
+
+function evaluateIsBlankFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel) {
+  const parts = splitFormulaArgs(args);
+  const cell = resolveCellRef(parts[0] ?? "", sheet);
+  if (!cell) return 0;
+  return (cell.value === "" && !cell.formula) ? 1 : 0;
+}
+
+function evaluateIsNumberFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel) {
+  const parts = splitFormulaArgs(args);
+  const cell = resolveCellRef(parts[0] ?? "", sheet);
+  if (!cell) return 0;
+  return cell.type === "number" || (!cell.type && cell.value !== "" && !isNaN(Number(cell.value))) ? 1 : 0;
+}
+
+function evaluateIsTextFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel) {
+  const parts = splitFormulaArgs(args);
+  const cell = resolveCellRef(parts[0] ?? "", sheet);
+  if (!cell) return 0;
+  return cell.type === "string" ? 1 : 0;
+}
+
+function evaluateIsErrorFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel) {
+  const parts = splitFormulaArgs(args);
+  const val = firstNumericFormulaArg(state, parts[0] ?? "", sheet, new Set());
+  return val === undefined ? 1 : 0;
+}
+
+function evaluateIsNaFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel) {
+  const parts = splitFormulaArgs(args);
+  const val = firstNumericFormulaArg(state, parts[0] ?? "", sheet, new Set());
+  return val === undefined ? 1 : 0;
+}
+
+function evaluateIsEvenOddFormula(state: ExcelWorkbookState | undefined, args: string, sheet: ExcelSheetModel, isEven: boolean) {
+  const parts = splitFormulaArgs(args);
+  const val = firstNumericFormulaArg(state, parts[0] ?? "", sheet, new Set());
+  if (val === undefined) return 0;
+  return (isEven ? Math.abs(Math.round(val)) % 2 === 0 : Math.abs(Math.round(val)) % 2 === 1) ? 1 : 0;
 }
 
 function evaluateConditionalAggregationFormula(state: ExcelWorkbookState | undefined, formula: string, sheet: ExcelSheetModel) {
