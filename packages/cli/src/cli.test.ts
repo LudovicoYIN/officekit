@@ -301,6 +301,8 @@ describe("officekit CLI scaffold", () => {
     const beforeChart = await runCli(["get", filePath, "/Sheet1/chart[1]", "--json"]);
     const beforePivot = await runCli(["get", filePath, "/Sheet1/pivottable[1]", "--json"]);
     const beforeSparkline = await runCli(["get", filePath, "/Sheet1/sparkline[1]", "--json"]);
+    const beforeShape = await runCli(["get", filePath, "/Sheet1/shape[1]", "--json"]);
+    const beforePicture = await runCli(["get", filePath, "/Sheet1/picture[1]", "--json"]);
 
     expect(beforeValidation.stdout).toContain('"validationType": "list"');
     expect(beforeComment.stdout).toContain('"text": "Initial note"');
@@ -308,6 +310,8 @@ describe("officekit CLI scaffold", () => {
     expect(beforeChart.stdout).toContain('"title": "Initial Chart"');
     expect(beforePivot.stdout).toContain('"name": "PivotTable1"');
     expect(beforeSparkline.stdout).toContain('"location": "C2"');
+    expect(beforeShape.stdout).toContain('"name": "Shape 1"');
+    expect(beforePicture.stdout).toContain('"name": "Picture 1"');
 
     await runCli(["set", filePath, "/Sheet1/validation[1]", "--prop", "formula1=Yes,No", "--prop", "prompt=Pick one"]);
     await runCli(["set", filePath, "/Sheet1/comment[1]", "--prop", "text=Updated note", "--prop", "author=officekit"]);
@@ -315,7 +319,9 @@ describe("officekit CLI scaffold", () => {
     await runCli(["set", filePath, "/Sheet1/sparkline[1]", "--prop", "type=column", "--prop", "location=D2", "--prop", "sourceRange=A2:B2"]);
     await runCli(["set", filePath, "/Sheet1/chart[1]", "--prop", "title=Updated Chart"]);
     await runCli(["set", filePath, "/Sheet1/chart[1]/series[1]", "--prop", "name=Revenue Series"]);
-    await runCli(["set", filePath, "/Sheet1/pivottable[1]", "--prop", "name=Pivot Summary"]);
+    await runCli(["set", filePath, "/Sheet1/pivottable[1]", "--prop", "name=Pivot Summary", "--prop", "rowGrandTotals=false"]);
+    await runCli(["set", filePath, "/Sheet1/shape[1]", "--prop", "name=Updated Shape", "--prop", "text=Shape Copy", "--prop", "x=2", "--prop", "y=3"]);
+    await runCli(["set", filePath, "/Sheet1/picture[1]", "--prop", "name=Updated Picture", "--prop", "alt=Preview image"]);
 
     const validation = await runCli(["get", filePath, "/Sheet1/validation[1]", "--json"]);
     const comment = await runCli(["get", filePath, "/Sheet1/comment[1]", "--json"]);
@@ -324,7 +330,12 @@ describe("officekit CLI scaffold", () => {
     const pivot = await runCli(["get", filePath, "/Sheet1/pivottable[1]", "--json"]);
     const sparkline = await runCli(["get", filePath, "/Sheet1/sparkline[1]", "--json"]);
     const sparklineQuery = await runCli(["query", filePath, "sparkline"]);
+    const shapeQuery = await runCli(["query", filePath, "shape"]);
+    const pictureQuery = await runCli(["query", filePath, "picture"]);
+    const shape = await runCli(["get", filePath, "/Sheet1/shape[1]", "--json"]);
+    const picture = await runCli(["get", filePath, "/Sheet1/picture[1]", "--json"]);
     const rawChart = await runCli(["raw", filePath, "/Sheet1/chart[1]"]);
+    const rawDrawing = await runCli(["raw", filePath, "/Sheet1/drawing"]);
 
     expect(validation.stdout).toContain('"formula1": "Yes,No"');
     expect(validation.stdout).toContain('"prompt": "Pick one"');
@@ -335,12 +346,20 @@ describe("officekit CLI scaffold", () => {
     expect(table.stdout).toContain('"totalsRow": true');
     expect(chart.stdout).toContain('"title": "Updated Chart"');
     expect(pivot.stdout).toContain('"name": "Pivot Summary"');
+    expect(pivot.stdout).toContain('"rowGrandTotals": false');
     expect(sparkline.stdout).toContain('"location": "D2"');
     expect(sparkline.stdout).toContain('"sourceRange": "A2:B2"');
     expect(sparkline.stdout).toContain('"sparklineType": "column"');
     expect(sparklineQuery.stdout).toContain('"type": "sparkline"');
+    expect(shape.stdout).toContain('"name": "Updated Shape"');
+    expect(shape.stdout).toContain('"text": "Shape Copy"');
+    expect(picture.stdout).toContain('"name": "Updated Picture"');
+    expect(shapeQuery.stdout).toContain('"type": "shape"');
+    expect(pictureQuery.stdout).toContain('"type": "picture"');
     expect(rawChart.stdout).toContain("Updated Chart");
     expect(rawChart.stdout).toContain("Revenue Series");
+    expect(rawDrawing.stdout).toContain("Updated Shape");
+    expect(rawDrawing.stdout).toContain('descr="Preview image"');
   });
 
   test("creates and mutates a PowerPoint document vertical slice", async () => {
@@ -1632,6 +1651,25 @@ function buildExternalExcelAdvancedObjectsZip() {
       name: "xl/drawings/drawing1.xml",
       data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor>
+    <xdr:from><xdr:col>0</xdr:col><xdr:row>6</xdr:row></xdr:from>
+    <xdr:to><xdr:col>3</xdr:col><xdr:row>9</xdr:row></xdr:to>
+    <xdr:sp>
+      <xdr:nvSpPr><xdr:cNvPr id="3" name="Shape 1"/><xdr:cNvSpPr/><xdr:nvPr/></xdr:nvSpPr>
+      <xdr:spPr/>
+      <xdr:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>Initial shape text</a:t></a:r></a:p></xdr:txBody>
+    </xdr:sp>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+  <xdr:twoCellAnchor>
+    <xdr:from><xdr:col>4</xdr:col><xdr:row>6</xdr:row></xdr:from>
+    <xdr:to><xdr:col>6</xdr:col><xdr:row>9</xdr:row></xdr:to>
+    <xdr:pic>
+      <xdr:nvPicPr><xdr:cNvPr id="4" name="Picture 1"/><xdr:cNvPicPr/><xdr:nvPr/></xdr:nvPicPr>
+      <xdr:blipFill/><xdr:spPr/>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
   <xdr:twoCellAnchor>
     <xdr:from><xdr:col>0</xdr:col><xdr:row>4</xdr:row></xdr:from>
     <xdr:to><xdr:col>5</xdr:col><xdr:row>12</xdr:row></xdr:to>

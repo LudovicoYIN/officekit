@@ -370,6 +370,14 @@ export async function setExcelNode(filePath: string, targetPath: string, options
     return next;
   }
 
+  const drawingObjectMatch = /^\/([^/]+)\/(shape|picture)\[(\d+)\]$/i.exec(targetPath);
+  if (drawingObjectMatch) {
+    const sheet = ensureSheetState(state, drawingObjectMatch[1]);
+    const next = setDrawingObject(state, sheet, drawingObjectMatch[2].toLowerCase() as "shape" | "picture", Number(drawingObjectMatch[3]), options.props);
+    await writeWorkbookState(filePath, state);
+    return next;
+  }
+
   const sparklineMatch = /^\/([^/]+)\/sparkline\[(\d+)\]$/i.exec(targetPath);
   if (sparklineMatch) {
     const sheet = ensureSheetState(state, sparklineMatch[1]);
@@ -427,6 +435,49 @@ export async function removeExcelNode(filePath: string, targetPath: string) {
     }
     state.namedRanges = nextRanges;
     updateWorkbookXml(state);
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
+  const validationMatch = /^\/([^/]+)\/validation\[(\d+)\]$/i.exec(targetPath);
+  if (validationMatch) {
+    const sheet = ensureSheetState(state, validationMatch[1]);
+    const validations = parseValidations(sheet.xml);
+    const index = Number(validationMatch[2]) - 1;
+    if (!validations[index]) throw new OfficekitError(`Validation ${validationMatch[2]} does not exist.`, "not_found");
+    sheet.xml = replaceSheetValidations(sheet.xml, validations.filter((_, itemIndex) => itemIndex !== index));
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
+  const commentMatch = /^\/([^/]+)\/comment\[(\d+)\]$/i.exec(targetPath);
+  if (commentMatch) {
+    const sheet = ensureSheetState(state, commentMatch[1]);
+    removeComment(state, sheet, Number(commentMatch[2]));
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
+  const tableMatch = /^\/([^/]+)\/table\[(\d+)\]$/i.exec(targetPath);
+  if (tableMatch) {
+    const sheet = ensureSheetState(state, tableMatch[1]);
+    removeTable(state, sheet, Number(tableMatch[2]));
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
+  const sparklineMatch = /^\/([^/]+)\/sparkline\[(\d+)\]$/i.exec(targetPath);
+  if (sparklineMatch) {
+    const sheet = ensureSheetState(state, sparklineMatch[1]);
+    removeSparkline(sheet, Number(sparklineMatch[2]));
+    await writeWorkbookState(filePath, state);
+    return { ok: true, targetPath };
+  }
+
+  const drawingObjectMatch = /^\/([^/]+)\/(shape|picture)\[(\d+)\]$/i.exec(targetPath);
+  if (drawingObjectMatch) {
+    const sheet = ensureSheetState(state, drawingObjectMatch[1]);
+    removeDrawingObject(state, sheet, drawingObjectMatch[2].toLowerCase() as "shape" | "picture", Number(drawingObjectMatch[3]));
     await writeWorkbookState(filePath, state);
     return { ok: true, targetPath };
   }
@@ -500,6 +551,26 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
+  if (normalized === "shape" || normalized === "shapes") {
+    for (const sheet of state.sheets) {
+      getDrawingShapes(state, sheet)
+        .filter((item) => item.kind === "shape")
+        .forEach((shape, index) => {
+          nodes.push({ ...shape, path: `/${sheet.name}/shape[${index + 1}]`, type: "shape" });
+        });
+    }
+    return nodes;
+  }
+  if (normalized === "picture" || normalized === "pictures") {
+    for (const sheet of state.sheets) {
+      getDrawingShapes(state, sheet)
+        .filter((item) => item.kind === "picture")
+        .forEach((picture, index) => {
+          nodes.push({ ...picture, path: `/${sheet.name}/picture[${index + 1}]`, type: "picture" });
+        });
+    }
+    return nodes;
+  }
   if (normalized === "table" || normalized === "tables") {
     for (const sheet of state.sheets) {
       getSheetTables(state, sheet).forEach((table, index) => {
@@ -532,7 +603,7 @@ export async function queryExcelNodes(filePath: string, selector: string) {
     }
     return nodes;
   }
-  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, formula, validation, comment, table, chart, pivottable, sparkline.");
+  throw new UsageError(`Unsupported Excel query selector '${selector}'.`, "Supported selectors: sheet, namedrange, cell, formula, validation, comment, table, chart, pivottable, sparkline, shape, picture.");
 }
 
 export async function viewExcelDocument(filePath: string, mode: string) {
@@ -1514,8 +1585,149 @@ function setPivotTable(state: ExcelWorkbookState, sheet: ExcelSheetModel, index:
       xml = xml.replace(/<pivotTableDefinition\b/, `<pivotTableDefinition name="${escapeXml(props.name)}"`);
     }
   }
+  const booleanPivotProps: Array<[string, string]> = [
+    ["rowGrandTotals", "rowGrandTotals"],
+    ["colGrandTotals", "colGrandTotals"],
+    ["compact", "compact"],
+    ["compactData", "compactData"],
+    ["outline", "outline"],
+  ];
+  for (const [propKey, attrName] of booleanPivotProps) {
+    const rawValue = props[propKey] ?? props[propKey.toLowerCase()];
+    if (rawValue === undefined) continue;
+    const attrValue = isTruthy(rawValue) ? "1" : "0";
+    if (new RegExp(`\\b${attrName}="[^"]+"`).test(xml)) {
+      xml = xml.replace(new RegExp(`\\b${attrName}="[^"]+"`), `${attrName}="${attrValue}"`);
+    } else {
+      xml = xml.replace(/<pivotTableDefinition\b/, `<pivotTableDefinition ${attrName}="${attrValue}"`);
+    }
+  }
   state.zip.set(xmlPath, Buffer.from(xml, "utf8"));
-  return { ...pivot, ...(props.name !== undefined ? { name: props.name } : {}) };
+  return {
+    ...pivot,
+    ...(props.name !== undefined ? { name: props.name } : {}),
+    ...Object.fromEntries(
+      booleanPivotProps
+        .filter(([propKey]) => props[propKey] !== undefined || props[propKey.toLowerCase()] !== undefined)
+        .map(([propKey]) => [propKey, isTruthy(props[propKey] ?? props[propKey.toLowerCase()] ?? "false")]),
+    ),
+  };
+}
+
+function setDrawingObject(
+  state: ExcelWorkbookState,
+  sheet: ExcelSheetModel,
+  kind: "shape" | "picture",
+  index: number,
+  props: Record<string, string>,
+) {
+  const drawingPath = resolveDrawingPath(state, sheet);
+  if (!drawingPath) {
+    throw new OfficekitError(`Sheet '${sheet.name}' has no drawing part.`, "not_found");
+  }
+  const xml = requireEntry(state.zip, drawingPath);
+  const block = getDrawingAnchorBlocks(xml, kind)[index - 1];
+  if (!block) {
+    throw new OfficekitError(`${kind} ${index} does not exist.`, "not_found");
+  }
+  let nextBlock = block;
+  if (props.name !== undefined) {
+    nextBlock = nextBlock.replace(/name="[^"]*"/, `name="${escapeXml(props.name)}"`);
+  }
+  if (props.alt !== undefined || props.description !== undefined) {
+    const description = props.alt ?? props.description ?? "";
+    if (/descr="[^"]*"/.test(nextBlock)) {
+      nextBlock = nextBlock.replace(/descr="[^"]*"/, `descr="${escapeXml(description)}"`);
+    } else {
+      nextBlock = nextBlock.replace(/<xdr:cNvPr\b/, `<xdr:cNvPr descr="${escapeXml(description)}"`);
+    }
+  }
+  if (kind === "shape" && (props.text !== undefined || props.value !== undefined)) {
+    const text = props.text ?? props.value ?? "";
+    if (/<a:t>[\s\S]*?<\/a:t>/.test(nextBlock)) {
+      nextBlock = nextBlock.replace(/<a:t>[\s\S]*?<\/a:t>/, `<a:t>${escapeXml(text)}</a:t>`);
+    }
+  }
+  const anchorReplacements: Array<[string, string, string]> = [
+    ["x", "<xdr:col>", "</xdr:col>"],
+    ["y", "<xdr:row>", "</xdr:row>"],
+    ["width", "<xdr:col>", "</xdr:col>"],
+    ["height", "<xdr:row>", "</xdr:row>"],
+  ];
+  for (const [propKey, openTag, closeTag] of anchorReplacements) {
+    if (props[propKey] === undefined) continue;
+    const numeric = Number(props[propKey]);
+    if (Number.isNaN(numeric)) continue;
+    if (propKey === "x" || propKey === "y") {
+      const tag = propKey === "x" ? "col" : "row";
+      nextBlock = nextBlock.replace(new RegExp(`(<xdr:from>[\\s\\S]*?<xdr:${tag}>)([\\s\\S]*?)(<\\/xdr:${tag}>)`), `$1${numeric}$3`);
+    } else {
+      const tag = propKey === "width" ? "col" : "row";
+      nextBlock = nextBlock.replace(new RegExp(`(<xdr:to>[\\s\\S]*?<xdr:${tag}>)([\\s\\S]*?)(<\\/xdr:${tag}>)`), `$1${numeric}$3`);
+    }
+  }
+  state.zip.set(drawingPath, Buffer.from(xml.replace(block, nextBlock), "utf8"));
+  const updated = getDrawingShapes(state, sheet).filter((item) => item.kind === kind)[index - 1];
+  return updated;
+}
+
+function removeComment(state: ExcelWorkbookState, sheet: ExcelSheetModel, index: number) {
+  const commentsPath = resolveCommentsPath(state, sheet);
+  if (!commentsPath) {
+    throw new OfficekitError(`Comment ${index} does not exist.`, "not_found");
+  }
+  const comments = getSheetComments(state, sheet);
+  if (!comments[index - 1]) {
+    throw new OfficekitError(`Comment ${index} does not exist.`, "not_found");
+  }
+  state.zip.set(commentsPath, Buffer.from(renderCommentsXml(comments.filter((_, itemIndex) => itemIndex !== index - 1)), "utf8"));
+}
+
+function removeTable(state: ExcelWorkbookState, sheet: ExcelSheetModel, index: number) {
+  const tables = getSheetTables(state, sheet);
+  const table = tables[index - 1];
+  if (!table) {
+    throw new OfficekitError(`Table ${index} does not exist.`, "not_found");
+  }
+  const xmlPath = normalizeZipPath(path.posix.dirname(sheet.entryName), table.path);
+  state.zip.delete(xmlPath);
+  const relsPath = getRelationshipsEntryName(sheet.entryName);
+  const relsXml = requireEntry(state.zip, relsPath);
+  state.zip.set(relsPath, Buffer.from(relsXml.replace(new RegExp(`<Relationship\\b[^>]*Target="${escapeXmlForRegex(table.path)}"[^>]*/>`, "g"), ""), "utf8"));
+}
+
+function removeSparkline(sheet: ExcelSheetModel, index: number) {
+  const groups = [...sheet.xml.matchAll(/<x14:sparklineGroup\b[\s\S]*?<\/x14:sparklineGroup>/g)];
+  let current = 0;
+  for (const group of groups) {
+    const sparklineBlocks = [...group[0].matchAll(/<x14:sparkline\b[\s\S]*?<\/x14:sparkline>/g)];
+    for (const sparklineBlock of sparklineBlocks) {
+      current += 1;
+      if (current !== index) continue;
+      const nextGroup = group[0].replace(sparklineBlock[0], "");
+      sheet.xml = sheet.xml.replace(group[0], /<x14:sparkline\b/.test(nextGroup) ? nextGroup : "");
+      return;
+    }
+  }
+  throw new OfficekitError(`Sparkline ${index} does not exist.`, "not_found");
+}
+
+function removeDrawingObject(state: ExcelWorkbookState, sheet: ExcelSheetModel, kind: "shape" | "picture", index: number) {
+  const drawingPath = resolveDrawingPath(state, sheet);
+  if (!drawingPath) {
+    throw new OfficekitError(`Sheet '${sheet.name}' has no drawing part.`, "not_found");
+  }
+  const xml = requireEntry(state.zip, drawingPath);
+  const block = getDrawingAnchorBlocks(xml, kind)[index - 1];
+  if (!block) {
+    throw new OfficekitError(`${kind} ${index} does not exist.`, "not_found");
+  }
+  state.zip.set(drawingPath, Buffer.from(xml.replace(block, ""), "utf8"));
+}
+
+function getDrawingAnchorBlocks(xml: string, kind: "shape" | "picture") {
+  const anchors = [...xml.matchAll(/<xdr:twoCellAnchor\b[\s\S]*?<\/xdr:twoCellAnchor>/g)].map((match) => match[0]);
+  return anchors.filter((anchor) => kind === "picture" ? /<xdr:pic\b/.test(anchor) : /<xdr:sp\b/.test(anchor));
 }
 
 function normalizeSheetPath(targetPath: string) {
@@ -1775,6 +1987,11 @@ function getSheetPivots(state: ExcelWorkbookState, sheet: ExcelSheetModel) {
     return {
       path: relationship.target,
       name: parseAttr(xml, "name") ?? undefined,
+      ...(parseAttr(xml, "rowGrandTotals") !== undefined ? { rowGrandTotals: isTruthy(parseAttr(xml, "rowGrandTotals") ?? "false") } : {}),
+      ...(parseAttr(xml, "colGrandTotals") !== undefined ? { colGrandTotals: isTruthy(parseAttr(xml, "colGrandTotals") ?? "false") } : {}),
+      ...(parseAttr(xml, "compact") !== undefined ? { compact: isTruthy(parseAttr(xml, "compact") ?? "false") } : {}),
+      ...(parseAttr(xml, "compactData") !== undefined ? { compactData: isTruthy(parseAttr(xml, "compactData") ?? "false") } : {}),
+      ...(parseAttr(xml, "outline") !== undefined ? { outline: isTruthy(parseAttr(xml, "outline") ?? "false") } : {}),
     };
   });
 }
@@ -2274,4 +2491,8 @@ function escapeHtml(value: string) {
 
 function escapeXml(value: string) {
   return escapeHtml(value).replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+}
+
+function escapeXmlForRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
