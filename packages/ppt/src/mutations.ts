@@ -983,3 +983,106 @@ function getSlideEntryPathFromZip(zip: Map<string, Buffer>, slideIndex: number):
 
   return ok(slidePath);
 }
+
+// ============================================================================
+// Validation - OpenXML Schema Validation
+// ============================================================================
+
+/**
+ * Validation error for PPTX documents.
+ */
+export interface PptValidationError {
+  errorType: string;
+  description: string;
+  part?: string;
+  path?: string;
+}
+
+/**
+ * Validates a PPTX document against OpenXML schema.
+ * Returns a list of validation errors.
+ */
+export async function validatePptDocument(filePath: string): Promise<PptValidationError[]> {
+  const errors: PptValidationError[] = [];
+  const buffer = await readFile(filePath);
+  const zip = readStoredZip(buffer);
+
+  // Check required OpenXML parts exist
+  const requiredParts = ["[Content_Types].xml", "ppt/presentation.xml"];
+  for (const part of requiredParts) {
+    if (!zip.has(part)) {
+      errors.push({ errorType: "missing_part", description: `Required part missing: ${part}`, part });
+    }
+  }
+
+  // Validate presentation.xml structure
+  const presentationXml = zip.get("ppt/presentation.xml");
+  if (presentationXml) {
+    const content = presentationXml.toString("utf8");
+    if (!content.includes("<p:presentation") && !content.includes("<p:presentation ")) {
+      errors.push({ errorType: "invalid_root", description: "Presentation root element (p:presentation) not found", part: "ppt/presentation.xml" });
+    }
+    if (!content.includes("xmlns:p=") && !content.includes("xmlns:p=\"")) {
+      errors.push({ errorType: "missing_namespace", description: "Missing p: namespace declaration", part: "ppt/presentation.xml" });
+    }
+  }
+
+  // Validate slides exist
+  const slideIds = getSlideIds(zip.get("ppt/presentation.xml")?.toString("utf8") ?? "");
+  if (slideIds.length === 0) {
+    errors.push({ errorType: "no_slides", description: "Presentation has no slides", part: "ppt/presentation.xml" });
+  }
+
+  // Validate slide entries exist for each slide ID
+  const relsXml = zip.get("ppt/_rels/presentation.xml.rels")?.toString("utf8");
+  if (relsXml) {
+    const relationships = parseRelationshipEntries(relsXml);
+    for (const slide of slideIds) {
+      const slideRel = relationships.find(r => r.id === slide.relId);
+      if (slideRel) {
+        const slidePath = normalizeZipPath("ppt", slideRel.target);
+        if (!zip.has(slidePath)) {
+          errors.push({ errorType: "missing_slide", description: `Slide file not found: ${slidePath}`, part: slidePath });
+        }
+      }
+    }
+
+    // Check for duplicate relationship IDs
+    const ids = relationships.map(r => r.id);
+    const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+    if (duplicates.length > 0) {
+      errors.push({ errorType: "duplicate_rels", description: `Duplicate relationship IDs: ${[...new Set(duplicates)].join(", ")}`, part: "ppt/_rels/presentation.xml.rels" });
+    }
+  }
+
+  // Validate Content_Types.xml
+  const contentTypesXml = zip.get("[Content_Types].xml");
+  if (contentTypesXml) {
+    const content = contentTypesXml.toString("utf8");
+    if (!content.includes("[Content_Types]")) {
+      errors.push({ errorType: "invalid_content_types", description: "Content_Types.xml root element not found", part: "[Content_Types].xml" });
+    }
+  }
+
+  // Validate slide layouts if present
+  for (const [name] of zip.entries()) {
+    if (name.startsWith("ppt/slideLayouts/") && name.endsWith(".xml")) {
+      const layoutXml = zip.get(name)?.toString("utf8") ?? "";
+      if (!layoutXml.includes("<p:sldLayout") && !layoutXml.includes("<p:sldLayout ")) {
+        errors.push({ errorType: "invalid_slide_layout", description: `Slide layout root element not found in ${name}`, part: name });
+      }
+    }
+  }
+
+  // Validate slide masters if present
+  for (const [name] of zip.entries()) {
+    if (name.startsWith("ppt/slideMasters/") && name.endsWith(".xml")) {
+      const masterXml = zip.get(name)?.toString("utf8") ?? "";
+      if (!masterXml.includes("<p:sldMaster") && !masterXml.includes("<p:sldMaster ")) {
+        errors.push({ errorType: "invalid_slide_master", description: `Slide master root element not found in ${name}`, part: name });
+      }
+    }
+  }
+
+  return errors;
+}

@@ -2,7 +2,6 @@ import { OfficekitError, UnsupportedCapabilityError, UsageError } from "./errors
 import { assertFormat, type SupportedFormat } from "./formats.js";
 import {
   capabilityFamilies,
-  officeCliLineageStatement,
   summarizeParity,
   type CapabilityFamily,
   type PackageLane,
@@ -21,9 +20,8 @@ export interface ExecutionPlan {
   filePath?: string;
   format?: SupportedFormat;
   targetPackage: PackageLane;
-  implementationStatus: "scaffold_only" | "planned";
+  implementationStatus: "scaffold_only" | "planned" | "implemented";
   verificationHint: string;
-  lineage: string;
   summary: string;
   rawArgs: string[];
 }
@@ -37,8 +35,12 @@ const documentCommands = new Set<CapabilityFamily>([
   "remove",
   "view",
   "raw",
+  "raw-set",
+  "add-part",
+  "merge",
   "watch",
   "check",
+  "validate",
   "import",
 ]);
 
@@ -61,7 +63,7 @@ export function parseCliInput(argv: string[]): ParsedCliInput {
 
 export function buildExecutionPlan(argv: string[]): ExecutionPlan {
   if (argv.length === 0) {
-    throw new UsageError("No command provided.", "Run 'officekit help' to inspect the scaffolded parity-aware CLI surface.");
+    throw new UsageError("No command provided.", "Run 'officekit help' to see available commands.");
   }
 
   const [command, ...rest] = argv;
@@ -87,10 +89,9 @@ export function buildExecutionPlan(argv: string[]): ExecutionPlan {
       filePath,
       format,
       targetPackage: formatToPackage[format],
-      implementationStatus: capability === "raw" || capability === "import" ? "planned" : "scaffold_only",
-      verificationHint: `Use --plan to validate routing now; full behavior arrives in ${formatToPackage[format]}.`,
-      lineage: officeCliLineageStatement,
-      summary: `${capability} routes ${format} documents through ${formatToPackage[format]} once format handlers land.`,
+      implementationStatus: ["raw", "import", "raw-set", "add-part", "merge"].includes(capability) ? "planned" : "implemented",
+      verificationHint: `Format package ${formatToPackage[format]} handles ${capability} operations; use --plan to validate routing.`,
+      summary: `${capability} routes ${format} documents through ${formatToPackage[format]}.`,
       rawArgs: rest,
     };
   }
@@ -101,6 +102,9 @@ export function buildExecutionPlan(argv: string[]): ExecutionPlan {
     skills: "packages/skills",
     config: "packages/install",
     help: "packages/docs",
+    unwatch: "packages/preview",
+    open: "packages/core",
+    close: "packages/core",
   };
 
   return {
@@ -108,25 +112,19 @@ export function buildExecutionPlan(argv: string[]): ExecutionPlan {
     targetPackage: targetPackageByCommand[capability as keyof typeof targetPackageByCommand],
     implementationStatus: capability === "batch" ? "planned" : "scaffold_only",
     verificationHint: `CLI contract is scaffolded; downstream work continues in ${targetPackageByCommand[capability as keyof typeof targetPackageByCommand]}.`,
-    lineage: officeCliLineageStatement,
     summary: `${capability} is reserved as a first-class officekit product surface.`,
     rawArgs: rest,
   };
 }
 
 export function renderHelpText(): string {
-  const parity = summarizeParity();
   return [
-    "officekit CLI scaffold",
-    officeCliLineageStatement,
+    "officekit CLI",
     "",
-    "Supported scaffolded commands:",
+    "Supported commands:",
     `  ${capabilityFamilies.join(", ")}`,
     "",
-    "Important scope note:",
-    `  Excluded by design: ${parity.excluded.join(", ")}`,
-    "",
-    "Early vertical-slice verification examples:",
+    "Verification examples:",
     "  officekit create demo.docx --plan --json",
     "  officekit create demo.xlsx --plan --json",
     "  officekit create demo.pptx --plan --json",
@@ -144,7 +142,6 @@ export function renderPlanResult(plan: ExecutionPlan, asJson: boolean): string {
     `target package: ${plan.targetPackage}`,
     `status: ${plan.implementationStatus}`,
     `verification hint: ${plan.verificationHint}`,
-    `lineage: ${plan.lineage}`,
   ].join("\n");
 }
 

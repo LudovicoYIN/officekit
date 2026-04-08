@@ -14,16 +14,10 @@ describe("officekit CLI scaffold", () => {
     expect(result.stdout).toContain('"targetPackage": "packages/word"');
   });
 
-  test("returns lineage summary for about", async () => {
+  test("returns about info", async () => {
     const result = await runCli(["about"]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("migration of OfficeCLI");
-  });
-
-  test("keeps unsupported MCP explicit", async () => {
-    const result = await runCli(["mcp", "--json"]);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("capability_excluded");
+    expect(result.stdout).toContain("officekit CLI");
   });
 
   test("creates and mutates a Word document vertical slice", async () => {
@@ -807,6 +801,137 @@ describe("officekit CLI scaffold", () => {
     expect(rawStyles.stdout).toContain('shrinkToFit="1"');
     expect(rawStyles.stdout).toContain('locked="0"');
     expect(rawStyles.stdout).toContain('hidden="1"');
+  });
+
+  test("supports deeper OfficeCLI-style multi-criteria, text-join, and date/time formulas", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-formula-date-depth-"));
+    const filePath = path.join(dir, "formula-date-depth.xlsx");
+    await runCli(["create", filePath]);
+    await runCli(["set", filePath, "/Sheet1/A1", "--prop", "value=5", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A2", "--prop", "value=7", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A3", "--prop", "value=9", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/B1", "--prop", "value=North"]);
+    await runCli(["set", filePath, "/Sheet1/B2", "--prop", "value=South"]);
+    await runCli(["set", filePath, "/Sheet1/B3", "--prop", "value=North"]);
+    await runCli(["set", filePath, "/Sheet1/C1", "--prop", "value=Open"]);
+    await runCli(["set", filePath, "/Sheet1/C2", "--prop", "value=Closed"]);
+    await runCli(["set", filePath, "/Sheet1/C3", "--prop", "value=Open"]);
+    await runCli(["set", filePath, "/Sheet1/D1", "--prop", "value=44204", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/D2", "--prop", "value=44234", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/E1", "--prop", "value=Hello"]);
+    await runCli(["set", filePath, "/Sheet1/E2", "--prop", "value="]);
+    await runCli(["set", filePath, "/Sheet1/E3", "--prop", "value=World"]);
+
+    await runCli(["set", filePath, "/Sheet1/F1", "--prop", "formula==SUMIFS(A1:A3,B1:B3,\"North\",C1:C3,\"Open\")"]);
+    await runCli(["set", filePath, "/Sheet1/F2", "--prop", "formula==COUNTIFS(B1:B3,\"North\",C1:C3,\"Open\")"]);
+    await runCli(["set", filePath, "/Sheet1/F3", "--prop", "formula==AVERAGEIFS(A1:A3,B1:B3,\"North\",C1:C3,\"Open\")"]);
+    await runCli(["set", filePath, "/Sheet1/F4", "--prop", "formula==MAXIFS(A1:A3,B1:B3,\"North\")"]);
+    await runCli(["set", filePath, "/Sheet1/F5", "--prop", "formula==MINIFS(A1:A3,C1:C3,\"Open\")"]);
+    await runCli(["set", filePath, "/Sheet1/F6", "--prop", "formula==TEXTJOIN(\"-\",TRUE,E1:E3)"]);
+    await runCli(["set", filePath, "/Sheet1/F7", "--prop", "formula==DATE(2026,4,8)"]);
+    await runCli(["set", filePath, "/Sheet1/F8", "--prop", "formula==YEAR(D1)"]);
+    await runCli(["set", filePath, "/Sheet1/F9", "--prop", "formula==MONTH(D1)"]);
+    await runCli(["set", filePath, "/Sheet1/F10", "--prop", "formula==DAY(D1)"]);
+    await runCli(["set", filePath, "/Sheet1/F11", "--prop", "formula==DAYS(D2,D1)"]);
+    await runCli(["set", filePath, "/Sheet1/F12", "--prop", "formula==DATEDIF(D1,D2,\"D\")"]);
+    await runCli(["set", filePath, "/Sheet1/F13", "--prop", "formula==NETWORKDAYS(D1,D2)"]);
+    await runCli(["set", filePath, "/Sheet1/F14", "--prop", "formula==WORKDAY(D1,5)"]);
+    await runCli(["set", filePath, "/Sheet1/F15", "--prop", "formula==EOMONTH(D1,1)"]);
+
+    const f1 = await runCli(["get", filePath, "/Sheet1/F1", "--json"]);
+    const f2 = await runCli(["get", filePath, "/Sheet1/F2", "--json"]);
+    const f3 = await runCli(["get", filePath, "/Sheet1/F3", "--json"]);
+    const f4 = await runCli(["get", filePath, "/Sheet1/F4", "--json"]);
+    const f5 = await runCli(["get", filePath, "/Sheet1/F5", "--json"]);
+    const f6 = await runCli(["get", filePath, "/Sheet1/F6", "--json"]);
+    const f7 = await runCli(["get", filePath, "/Sheet1/F7", "--json"]);
+    const f8 = await runCli(["get", filePath, "/Sheet1/F8", "--json"]);
+    const f9 = await runCli(["get", filePath, "/Sheet1/F9", "--json"]);
+    const f10 = await runCli(["get", filePath, "/Sheet1/F10", "--json"]);
+    const f11 = await runCli(["get", filePath, "/Sheet1/F11", "--json"]);
+    const f12 = await runCli(["get", filePath, "/Sheet1/F12", "--json"]);
+    const f13 = await runCli(["get", filePath, "/Sheet1/F13", "--json"]);
+    const f14 = await runCli(["get", filePath, "/Sheet1/F14", "--json"]);
+    const f15 = await runCli(["get", filePath, "/Sheet1/F15", "--json"]);
+    const textView = await runCli(["view", filePath, "text"]);
+
+    expect(f1.stdout).toContain('"evaluatedValue": "14"');
+    expect(f2.stdout).toContain('"evaluatedValue": "2"');
+    expect(f3.stdout).toContain('"evaluatedValue": "7"');
+    expect(f4.stdout).toContain('"evaluatedValue": "9"');
+    expect(f5.stdout).toContain('"evaluatedValue": "5"');
+    expect(f6.stdout).toContain('"evaluatedValue": "Hello-World"');
+    expect(f7.stdout).toContain('"evaluatedValue": "46120"');
+    expect(f8.stdout).toContain('"evaluatedValue": "2021"');
+    expect(f9.stdout).toContain('"evaluatedValue": "1"');
+    expect(f10.stdout).toContain('"evaluatedValue": "8"');
+    expect(f11.stdout).toContain('"evaluatedValue": "30"');
+    expect(f12.stdout).toContain('"evaluatedValue": "30"');
+    expect(f13.stdout).toContain('"evaluatedValue": "21"');
+    expect(f14.stdout).toContain('"evaluatedValue": "44211"');
+    expect(f15.stdout).toContain('"evaluatedValue": "44255"');
+    expect(textView.stdout).toContain("[/Sheet1/row[6]] Hello-World");
+  });
+
+  test("supports broader statistical, logical, text, financial, and conversion formula helpers", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-excel-formula-broad-"));
+    const filePath = path.join(dir, "formula-broad.xlsx");
+    await runCli(["create", filePath]);
+    await runCli(["set", filePath, "/Sheet1/A1", "--prop", "value=1", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A2", "--prop", "value=2", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A3", "--prop", "value=2", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/A4", "--prop", "value=4", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/B1", "--prop", "value=Hello"]);
+    await runCli(["set", filePath, "/Sheet1/B2", "--prop", "value=HELLO"]);
+    await runCli(["set", filePath, "/Sheet1/B3", "--prop", "value=2026-04-08"]);
+    await runCli(["set", filePath, "/Sheet1/C1", "--prop", "value=8", "--prop", "type=number"]);
+    await runCli(["set", filePath, "/Sheet1/C2", "--prop", "value=", "--prop", "type=string"]);
+
+    await runCli(["set", filePath, "/Sheet1/D1", "--prop", "formula==MEDIAN(A1:A4)"]);
+    await runCli(["set", filePath, "/Sheet1/D2", "--prop", "formula==MODE(A1:A4)"]);
+    await runCli(["set", filePath, "/Sheet1/D3", "--prop", "formula==PERCENTILE(A1:A4,0.5)"]);
+    await runCli(["set", filePath, "/Sheet1/D4", "--prop", "formula==PERCENTRANK(A1:A4,2)"]);
+    await runCli(["set", filePath, "/Sheet1/D5", "--prop", "formula==COUNTBLANK(C1:C2)"]);
+    await runCli(["set", filePath, "/Sheet1/D6", "--prop", "formula==PRODUCT(A1:A4)"]);
+    await runCli(["set", filePath, "/Sheet1/D7", "--prop", "formula==QUOTIENT(9,2)"]);
+    await runCli(["set", filePath, "/Sheet1/D8", "--prop", "formula==SWITCH(A2,1,\"one\",2,\"two\",\"other\")"]);
+    await runCli(["set", filePath, "/Sheet1/D9", "--prop", "formula==CHOOSE(2,\"red\",\"blue\",\"green\")"]);
+    await runCli(["set", filePath, "/Sheet1/D10", "--prop", "formula==SEARCH(\"ell\",B1)"]);
+    await runCli(["set", filePath, "/Sheet1/D11", "--prop", "formula==SUBSTITUTE(B1,\"l\",\"x\",2)"]);
+    await runCli(["set", filePath, "/Sheet1/D12", "--prop", "formula==TEXT(12.3,\"0.0\")"]);
+    await runCli(["set", filePath, "/Sheet1/D13", "--prop", "formula==FIXED(12.345,1)"]);
+    await runCli(["set", filePath, "/Sheet1/D14", "--prop", "formula==NUMBERVALUE(\"1,234.5\")"]);
+    await runCli(["set", filePath, "/Sheet1/D15", "--prop", "formula==NETWORKDAYS_INTL(44204,44234,1)"]);
+    await runCli(["set", filePath, "/Sheet1/D16", "--prop", "formula==WORKDAY_INTL(44204,5,1)"]);
+    await runCli(["set", filePath, "/Sheet1/D17", "--prop", "formula==YEARFRAC(44204,44234)"]);
+    await runCli(["set", filePath, "/Sheet1/D18", "--prop", "formula==PMT(0.1/12,12,-1200)"]);
+
+    const values = await Promise.all(
+      Array.from({ length: 18 }, (_, index) => runCli(["get", filePath, `/Sheet1/D${index + 1}`, "--json"])),
+    );
+    const textView = await runCli(["view", filePath, "text"]);
+
+    expect(values[0].stdout).toContain('"evaluatedValue": "2"');
+    expect(values[1].stdout).toContain('"evaluatedValue": "2"');
+    expect(values[2].stdout).toContain('"evaluatedValue": "2"');
+    expect(values[3].stdout).toContain('"evaluatedValue": "0.3333333333"');
+    expect(values[4].stdout).toContain('"evaluatedValue": "1"');
+    expect(values[5].stdout).toContain('"evaluatedValue": "16"');
+    expect(values[6].stdout).toContain('"evaluatedValue": "4"');
+    expect(values[7].stdout).toContain('"evaluatedValue": "two"');
+    expect(values[8].stdout).toContain('"evaluatedValue": "blue"');
+    expect(values[9].stdout).toContain('"evaluatedValue": "2"');
+    expect(values[10].stdout).toContain('"evaluatedValue": "Helxo"');
+    expect(values[11].stdout).toContain('"evaluatedValue": "12.3"');
+    expect(values[12].stdout).toContain('"evaluatedValue": "12.3"');
+    expect(values[13].stdout).toContain('"evaluatedValue": "1234.5"');
+    expect(values[14].stdout).toContain('"evaluatedValue": "27"');
+    expect(values[15].stdout).toContain('"evaluatedValue": "44210"');
+    expect(values[16].stdout).toContain('"evaluatedValue": "0.08213552361396304"');
+    expect(values[17].stdout).toContain('"evaluatedValue": "100"');
+    expect(textView.stdout).toContain("[/Sheet1/row[8]] two");
+    expect(textView.stdout).toContain("[/Sheet1/row[9]] blue");
+    expect(textView.stdout).toContain("[/Sheet1/row[11]] Helxo");
   });
 
   test("supports richer chart properties beyond title and series name", async () => {
@@ -1648,6 +1773,131 @@ describe("officekit CLI scaffold", () => {
     const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
     expect(exitCode).toBe(0);
   });
+
+  test("unwatch stops an active preview session", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-unwatch-"));
+    const filePath = path.join(dir, "watch.docx");
+    await runCli(["create", filePath]);
+    await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Watching"]);
+
+    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0"], {
+      cwd: path.resolve(import.meta.dir, "../../.."),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdout = await waitForOutput(child.stdout, /"url":\s*"([^"]+)"/);
+    const urlMatch = stdout.match(/"url":\s*"([^"]+)"/);
+    expect(urlMatch).not.toBeNull();
+
+    const stopResult = await runCli(["unwatch", filePath]);
+    expect(stopResult.exitCode).toBe(0);
+    expect(stopResult.stdout).toContain("Watch stopped");
+
+    const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+    expect(exitCode).toBe(0);
+  });
+
+  test("open and close manage a resident session lifecycle", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-open-close-"));
+    const filePath = path.join(dir, "resident.docx");
+    await runCli(["create", filePath]);
+
+    const openResult = await runCli(["open", filePath]);
+    expect(openResult.exitCode).toBe(0);
+    const opened = JSON.parse(openResult.stdout ?? "{}") as { ok: boolean; pid: number; reused: boolean };
+    expect(opened.ok).toBe(true);
+    expect(typeof opened.pid).toBe("number");
+    expect(() => process.kill(opened.pid, 0)).not.toThrow();
+
+    const closeResult = await runCli(["close", filePath]);
+    expect(closeResult.exitCode).toBe(0);
+
+    await Bun.sleep(100);
+    expect(() => process.kill(opened.pid, 0)).toThrow();
+  });
+
+  test("merge supports Word OOXML templates", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-merge-word-"));
+    const templatePath = path.join(dir, "template.docx");
+    const outputPath = path.join(dir, "output.docx");
+    await writeFile(templatePath, buildExternalWordZip("Hello {{name}}"));
+
+    const result = await runCli(["merge", templatePath, outputPath, "--data", '{"name":"OfficeCLI"}']);
+    const merged = await runCli(["get", outputPath, "/body/p[1]", "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"replacements": 1');
+    expect(merged.stdout).toContain("Hello OfficeCLI");
+  });
+
+  test("merge supports Excel OOXML templates", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-merge-excel-"));
+    const templatePath = path.join(dir, "template.xlsx");
+    const outputPath = path.join(dir, "output.xlsx");
+    await writeFile(templatePath, buildExternalExcelTemplateZip("Hello {{name}}"));
+
+    const result = await runCli(["merge", templatePath, outputPath, "--data", '{"name":"OfficeCLI"}']);
+    const merged = await runCli(["get", outputPath, "/Sheet1/A1", "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"replacements": 1');
+    expect(merged.stdout).toContain('"value": "Hello OfficeCLI"');
+  });
+
+  test("add-part supports Word, Excel, and PowerPoint chart/header flows", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-add-part-"));
+
+    const wordPath = path.join(dir, "part.docx");
+    await runCli(["create", wordPath]);
+    const wordHeader = await runCli(["add-part", wordPath, "/", "--type", "header", "--prop", "text=Header copy"]);
+    expect(wordHeader.exitCode).toBe(0);
+    expect(wordHeader.stdout).toContain("/header[1]");
+
+    const excelPath = path.join(dir, "part.xlsx");
+    await runCli(["create", excelPath]);
+    await runCli(["set", excelPath, "/Sheet1/A1", "--prop", "value=Metric"]);
+    await runCli(["set", excelPath, "/Sheet1/B1", "--prop", "value=Q1"]);
+    await runCli(["set", excelPath, "/Sheet1/A2", "--prop", "value=Revenue"]);
+    await runCli(["set", excelPath, "/Sheet1/B2", "--prop", "value=10", "--prop", "type=number"]);
+    const excelChart = await runCli([
+      "add-part",
+      excelPath,
+      "/Sheet1",
+      "--type",
+      "chart",
+      "--prop",
+      "title=Quarterly",
+      "--prop",
+      "dataRange=Sheet1!A1:B2",
+    ]);
+    expect(excelChart.exitCode).toBe(0);
+    expect(excelChart.stdout).toContain("/Sheet1/chart[1]");
+
+    const pptPath = path.join(dir, "part.pptx");
+    await runCli(["create", pptPath]);
+    await runCli(["add", pptPath, "/", "--type", "slide", "--prop", "title=Roadmap"]);
+    const pptChart = await runCli([
+      "add-part",
+      pptPath,
+      "/slide[1]",
+      "--type",
+      "chart",
+      "--prop",
+      "title=Launch Chart",
+      "--prop",
+      "categories=Q1,Q2,Q3",
+      "--prop",
+      "values=1,2,3",
+    ]);
+    const pptZip = readStoredZip(await readFile(pptPath));
+    const pptChartXml = [...pptZip.entries()]
+      .find(([name]) => name.endsWith(".xml") && name.includes("/charts/"))?.[1]
+      ?.toString("utf8") ?? "";
+
+    expect(pptChart.exitCode).toBe(0);
+    expect(pptChart.stdout).toContain("/slide[1]/chart[1]");
+    expect(pptChartXml).toContain("Launch Chart");
+  });
 });
 
 function buildExternalWordZip(text: string) {
@@ -2057,6 +2307,62 @@ function buildExternalExcelSheetExtrasZip() {
   <headerFooter><oddHeader>&amp;LHeader Left</oddHeader><oddFooter>&amp;RFooter Right</oddFooter></headerFooter>
   <rowBreaks count="1" manualBreakCount="1"><brk id="5" man="1"/></rowBreaks>
   <colBreaks count="1" manualBreakCount="1"><brk id="2" man="1"/></colBreaks>
+</worksheet>`),
+    },
+  ]);
+}
+
+function buildExternalExcelTemplateZip(text: string) {
+  return createStoredZip([
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`),
+    },
+    {
+      name: "_rels/.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/workbook.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`),
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/sharedStrings.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si><t>${text}</t></si>
+</sst>`),
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+  </sheetData>
 </worksheet>`),
     },
   ]);

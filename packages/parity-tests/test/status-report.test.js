@@ -35,7 +35,7 @@ test("fixture-backed parity report links Word, Excel, and PowerPoint slices", ()
   assert.deepEqual(powerpoint.previewModes, ["html", "svg"]);
 });
 
-test("parity coverage summary keeps scaffold status and remaining implementation work explicit", () => {
+test("parity coverage summary tracks implementation status and remaining gaps", () => {
   const coverage = summarizeFixtureCoverage();
   const documentation = createDocumentationParityReport();
 
@@ -45,7 +45,7 @@ test("parity coverage summary keeps scaffold status and remaining implementation
   assert.match(documentation.lineage, /migrated from OfficeCLI/i);
 
   for (const format of documentation.formats) {
-    assert.equal(format.status, "scaffolded");
+    assert.equal(format.status, "implemented");
     assert.ok(format.fixtureCount > 0, `missing fixtures for ${format.format}`);
     assert.ok(format.canonicalPathCount > 0, `missing canonical paths for ${format.format}`);
     assert.ok(format.implementationMilestones.length > 0, `missing milestones for ${format.format}`);

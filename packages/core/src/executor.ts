@@ -1,6 +1,7 @@
-import { createDocument, addDocumentNode, checkDocument, getDocumentNode, importDelimitedData, loadDocument, parseProps, queryDocumentNodes, rawDocument, removeDocumentNode, renderDocumentHtml, setDocumentNode, viewDocument, moveDocumentNode, swapDocumentNodes, copyDocumentNode } from "./document-store.js";
+import { createDocument, addDocumentNode, addDocumentPart, checkDocument, getDocumentNode, getResidentDocument, hasResidentSession, importDelimitedData, loadDocument, mergeDocument, parseProps, queryDocumentNodes, queryResidentDocument, rawDocument, rawSetDocument, removeDocumentNode, renderDocumentHtml, setDocumentNode, viewDocument, viewResidentDocument, moveDocumentNode, swapDocumentNodes, copyDocumentNode, validateDocument } from "./document-store.js";
 import { UnsupportedCapabilityError, UsageError } from "./errors.js";
 import { summarizeParity } from "./parity.js";
+import { readSessionRecord, removeSessionRecord, waitForSessionRecord } from "./session-registry.js";
 
 export interface CommandResult {
   exitCode: number;
@@ -57,9 +58,19 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
     const targetPath = rest[1] ?? "/";
     if (!filePath) throw new UsageError(`${command} requires <file> [path].`);
     const parsed = parseProps(rest.slice(2));
-    const result = command === "query"
-      ? await queryDocumentNodes(filePath, targetPath)
-      : await getDocumentNode(filePath, targetPath);
+
+    // Try resident session first if available
+    const hasResident = await hasResidentSession(filePath);
+    let result: unknown;
+    if (hasResident) {
+      result = command === "query"
+        ? await queryResidentDocument(filePath, targetPath)
+        : await getResidentDocument(filePath, targetPath);
+    } else {
+      result = command === "query"
+        ? await queryDocumentNodes(filePath, targetPath)
+        : await getDocumentNode(filePath, targetPath);
+    }
     return { exitCode: 0, stdout: parsed.json || command === "query" ? JSON.stringify(result, null, 2) : summarizeResult(result) };
   }
 
@@ -67,8 +78,16 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
     const filePath = rest[0];
     const mode = rest[1] ?? "outline";
     if (!filePath) throw new UsageError("view requires <file> <mode?>.");
-    const result = await viewDocument(filePath, mode);
-    return { exitCode: 0, stdout: result.output };
+
+    // Try resident session first if available
+    const hasResident = await hasResidentSession(filePath);
+    let output: string;
+    if (hasResident) {
+      output = (await viewResidentDocument(filePath, mode)).output;
+    } else {
+      output = (await viewDocument(filePath, mode)).output;
+    }
+    return { exitCode: 0, stdout: output };
   }
 
   if (command === "raw") {
@@ -113,6 +132,16 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
     const filePath = rest[0];
     if (!filePath) throw new UsageError("check requires <file>.");
     return { exitCode: 0, stdout: JSON.stringify(await checkDocument(filePath), null, 2) };
+  }
+
+  if (command === "validate") {
+    const filePath = rest[0];
+    if (!filePath) throw new UsageError("validate requires <file>.");
+    const result = await validateDocument(filePath);
+    return {
+      exitCode: result.valid ? 0 : 1,
+      stdout: JSON.stringify(result, null, 2),
+    };
   }
 
   if (command === "import") {
@@ -355,6 +384,167 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
       }
     }
     return { exitCode: 0, stdout: JSON.stringify({ ok: true, results }, null, 2) };
+  }
+
+  if (command === "raw-set") {
+    const filePath = rest[0];
+    const partPath = rest[1];
+    if (!filePath || !partPath) {
+      throw new UsageError("raw-set requires <file> <part-path>.");
+    }
+    let xpath = "";
+    let action = "";
+    let xml: string | undefined;
+    for (let index = 2; index < rest.length; index += 1) {
+      const token = rest[index];
+      if (token === "--xpath") {
+        xpath = rest[index + 1] ?? "";
+        index += 1;
+        continue;
+      }
+      if (token === "--action") {
+        action = rest[index + 1] ?? "";
+        index += 1;
+        continue;
+      }
+      if (token === "--xml") {
+        xml = rest[index + 1];
+        index += 1;
+        continue;
+      }
+    }
+    if (!xpath || !action) {
+      throw new UsageError("raw-set requires --xpath <xpath-expr> --action <action> [--xml <xml>].");
+    }
+    const result = await rawSetDocument(filePath, partPath, xpath, action, xml);
+    return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
+  }
+
+  if (command === "add-part") {
+    const filePath = rest[0];
+    const parentPath = rest[1];
+    if (!filePath || !parentPath) {
+      throw new UsageError("add-part requires <file> <parent-path>.");
+    }
+    const parsed = parseProps(rest.slice(2));
+    const partType = parsed.type ?? "chart";
+    if (!partType) {
+      throw new UsageError("add-part requires --type <part-type>.");
+    }
+    const result = await addDocumentPart(filePath, parentPath, partType, parsed.props);
+    return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
+  }
+
+  if (command === "merge") {
+    const templatePath = rest[0];
+    const outputPath = rest[1];
+    if (!templatePath || !outputPath) {
+      throw new UsageError("merge requires <template> <output>.");
+    }
+    const dataIndex = rest.indexOf("--data");
+    const dataArg = dataIndex >= 0 ? rest[dataIndex + 1] : undefined;
+    if (!dataArg) {
+      throw new UsageError("merge requires --data <json-or-file-path>.");
+    }
+
+    // Parse the data - could be JSON string or path to a .json file
+    let data: Record<string, unknown>;
+    if (dataArg.startsWith("{")) {
+      try {
+        data = JSON.parse(dataArg);
+      } catch {
+        return { exitCode: 1, stderr: "Failed to parse --data as JSON" };
+      }
+    } else {
+      // Treat as file path
+      try {
+        const fs = await import("node:fs/promises");
+        const content = await fs.readFile(dataArg, "utf8");
+        data = JSON.parse(content);
+      } catch {
+        return { exitCode: 1, stderr: `Failed to read or parse data file: ${dataArg}` };
+      }
+    }
+
+    const result = await mergeDocument(templatePath, data, outputPath);
+    return { exitCode: 0, stdout: JSON.stringify(result, null, 2) };
+  }
+
+  if (command === "unwatch") {
+    const filePath = rest[0];
+    if (!filePath) {
+      throw new UsageError("unwatch requires <file>.");
+    }
+    const session = await readSessionRecord("watch", filePath);
+    if (!session?.pid) {
+      return {
+        exitCode: 1,
+        stderr: JSON.stringify({ ok: false, message: `No active watch session for ${filePath}` }, null, 2),
+      };
+    }
+    process.kill(session.pid, "SIGTERM");
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({ ok: true, message: `Watch stopped for ${filePath}`, pid: session.pid }, null, 2),
+    };
+  }
+
+  if (command === "open") {
+    const filePath = rest[0];
+    if (!filePath) {
+      throw new UsageError("open requires <file>.");
+    }
+    try {
+      const existing = await readSessionRecord("resident", filePath);
+      if (existing?.pid) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ ok: true, filePath, pid: existing.pid, reused: true }, null, 2),
+        };
+      }
+      const { spawn } = await import("node:child_process");
+      const { fileURLToPath } = await import("node:url");
+      const workerPath = fileURLToPath(new URL("./resident-worker.ts", import.meta.url));
+      const child = spawn(process.execPath, ["run", workerPath, filePath], {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      const session = await waitForSessionRecord("resident", filePath, 2000);
+      if (!session?.pid) {
+        try {
+          process.kill(child.pid!, "SIGTERM");
+        } catch {}
+        return { exitCode: 1, stderr: `Failed to open ${filePath}: resident session did not start` };
+      }
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({ ok: true, filePath, pid: session.pid, reused: false }, null, 2),
+      };
+    } catch (e) {
+      return { exitCode: 1, stderr: `Failed to open ${filePath}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+
+  if (command === "close") {
+    const filePath = rest[0];
+    if (!filePath) {
+      throw new UsageError("close requires <file>.");
+    }
+    const session = await readSessionRecord("resident", filePath);
+    if (!session?.pid) {
+      return {
+        exitCode: 1,
+        stderr: JSON.stringify({ ok: false, message: `No active resident session for ${filePath}` }, null, 2),
+      };
+    }
+    process.kill(session.pid, "SIGTERM");
+    await removeSessionRecord("resident", filePath);
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({ ok: true, filePath, pid: session.pid }, null, 2),
+    };
   }
 
   if (command === "about") {

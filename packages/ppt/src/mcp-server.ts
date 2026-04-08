@@ -42,6 +42,7 @@ import {
 import { viewAsHtml } from "./preview-html.js";
 import { viewAsSvg } from "./preview-svg.js";
 import { checkShapeTextOverflow } from "./views.js";
+import { checkPresentation, formatCheckReport } from "./check.js";
 import { err, ok, isOk, isErr } from "./result.js";
 import type { Result } from "./types.js";
 
@@ -434,6 +435,30 @@ export class McpServer {
       case "CheckShapeTextOverflow": {
         const { pptPath } = args as { pptPath: string };
         return await checkShapeTextOverflow(filePath, pptPath);
+      }
+
+      case "Check": {
+        const { slideIndex, checkTextOverflow, checkMissingTitles, checkEmptySlides, minSeverity } = args as {
+          slideIndex?: number;
+          checkTextOverflow?: boolean;
+          checkMissingTitles?: boolean;
+          checkEmptySlides?: boolean;
+          minSeverity?: "info" | "warning" | "error";
+        };
+        const result = await checkPresentation(filePath, {
+          slideIndex,
+          checkTextOverflow,
+          checkMissingTitles,
+          checkEmptySlides,
+          minSeverity,
+        });
+        if (result.ok) {
+          return ok({
+            ...result.data!,
+            report: formatCheckReport(result.data!),
+          });
+        }
+        return result;
       }
 
       default:

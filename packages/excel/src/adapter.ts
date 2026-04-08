@@ -129,6 +129,43 @@ export interface ExcelChartModel {
 export interface ExcelPivotTableModel {
   name?: string;
   path: string;
+  source?: string;
+  location?: string;
+  rowGrandTotals?: boolean;
+  colGrandTotals?: boolean;
+  compact?: boolean;
+  compactData?: boolean;
+  outline?: boolean;
+  fields?: ExcelPivotTableField[];
+}
+
+export interface ExcelPivotTableField {
+  name: string;
+  axis?: "row" | "col" | "page" | "data" | "values";
+  index?: number;
+  subtotals?: string[];
+  sortItem?: { type: "manual" | "ascending" | "descending"; val?: string };
+}
+
+export interface ExcelNamedRangeResolution {
+  name: string;
+  ref: string;
+  resolvedRef: string;
+  chain: string[];
+  value?: number | string | boolean | null;
+}
+
+export interface ExcelNamedRangeValue {
+  name: string;
+  ref: string;
+  values: (number | string | boolean | null)[][];
+  summary?: {
+    sum?: number;
+    count?: number;
+    average?: number;
+    min?: number;
+    max?: number;
+  };
 }
 
 export interface ExcelSparklineModel {
@@ -2818,6 +2855,38 @@ function setPivotTable(state: ExcelWorkbookState, sheet: ExcelSheetModel, index:
       xml = xml.replace(/<pivotTableDefinition\b/, `<pivotTableDefinition ${attrName}="${attrValue}"`);
     }
   }
+
+  // Handle field assignments (rowFields, colFields, dataFields, pageFields)
+  const fieldProps: Array<[string, string]> = [
+    ["rowFields", "rowFields"],
+    ["colFields", "colFields"],
+    ["dataFields", "dataFields"],
+    ["pageFields", "pageFields"],
+  ];
+  for (const [propKey, tagName] of fieldProps) {
+    const rawValue = props[propKey] ?? props[propKey.toLowerCase()];
+    if (rawValue === undefined) continue;
+
+    const fields = rawValue.split(",").map((f) => f.trim()).filter(Boolean);
+    if (fields.length === 0) continue;
+
+    // Remove existing field element if present
+    xml = xml.replace(new RegExp(`<${tagName}>[\\s\\S]*?<\\/${tagName}>`, "g"), "");
+
+    // Add new field element
+    const fieldXml = fields.map((f) => `    <field idx="${f}"/>`).join("\n");
+    const newFieldElement = `\n  <${tagName}>\n${fieldXml}\n  </${tagName}>`;
+
+    // Insert before closing tag or at end of pivotTableDefinition
+    if (xml.endsWith("/>")) {
+      // Self-closing pivotTableDefinition - expand it
+      const attrs = xml.match(/<pivotTableDefinition([^>]*)\/>/)?.[1] ?? "";
+      xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<pivotTableDefinition${attrs}>${newFieldElement}\n</pivotTableDefinition>`;
+    } else {
+      xml = xml.replace(/<\/pivotTableDefinition>/, `${newFieldElement}\n</pivotTableDefinition>`);
+    }
+  }
+
   state.zip.set(xmlPath, Buffer.from(xml, "utf8"));
   return {
     ...pivot,
@@ -4275,7 +4344,7 @@ function evaluateRoundFormula(
 }
 
 function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, expression: string, sheet: ExcelSheetModel) {
-  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE|TEXT|FIXED|NUMBERVALUE|DOLLAR|YEN|T|N|VALUE|DEC2BIN|DEC2HEX|DEC2OCT|BIN2HEX|BIN2OCT|HEX2BIN|HEX2OCT|OCT2BIN|OCT2HEX|SWITCH|ADDRESS|ROMAN)\((.*)\)$/i.exec(expression);
+  const direct = /^(LEN|LEFT|RIGHT|MID|LOWER|UPPER|TRIM|CONCAT|CONCATENATE|FIND|SEARCH|REPLACE|SUBSTITUTE|EXACT|PROPER|CLEAN|REPT|CHAR|CODE|TEXT|FIXED|NUMBERVALUE|DOLLAR|YEN|T|N|VALUE|DEC2BIN|DEC2HEX|DEC2OCT|BIN2HEX|BIN2OCT|HEX2BIN|HEX2OCT|OCT2BIN|OCT2HEX|SWITCH|CHOOSE|ADDRESS|ROMAN)\((.*)\)$/i.exec(expression);
   if (!direct) return undefined;
   const fn = direct[1].toUpperCase();
   const args = splitFormulaArgs(direct[2]);
@@ -4438,6 +4507,20 @@ function evaluateTextFormulaForDisplay(state: ExcelWorkbookState | undefined, ex
   if (fn === "OCT2HEX") { const val = resolveText(args[0] ?? ""); const n = parseInt(val, 8); if (!Number.isFinite(n)) return undefined; const places = args[1] !== undefined ? Math.round(firstNumericFormulaArg(state, args[1], sheet, new Set()) ?? 0) : 0; let s = n.toString(16).toUpperCase(); if (places > 0) s = s.padStart(places, '0'); return s; }
   if (fn === "ROMAN") { const num = Math.round(firstNumericFormulaArg(state, args[0] ?? "0", sheet, new Set()) ?? 0); if (num < 0 || num > 3999) return undefined; const thousands = ['','M','MM','MMM']; const hundreds = ['','C','CC','CCC','CD','D','DC','DCC','DCCC','CM']; const tens = ['','X','XX','XXX','XL','L','LX','LXX','LXXX','XC']; const ones = ['','I','II','III','IV','V','VI','VII','VIII','IX']; return thousands[Math.floor(num/1000)] + hundreds[Math.floor((num%1000)/100)] + tens[Math.floor((num%100)/10)] + ones[num%10]; }
   if (fn === "ADDRESS") { const row = Math.round(firstNumericFormulaArg(state, args[0] ?? "1", sheet, new Set()) ?? 1); const col = Math.round(firstNumericFormulaArg(state, args[1] ?? "1", sheet, new Set()) ?? 1); const absNum = args[2] !== undefined ? Math.round(firstNumericFormulaArg(state, args[2], sheet, new Set()) ?? 1) : 1; const a1Style = args[3] === undefined || firstNumericFormulaArg(state, args[3], sheet, new Set()) !== 0; const sheetText = args[4] !== undefined ? resolveText(args[4]) : ""; const colStr = (() => { let c = ""; let n = col; while (n > 0) { c = String.fromCharCode(64 + (n % 26 || 26)) + c; n = Math.floor((n - 1) / 26); } return c; })(); const rowStr = String(row); if (!a1Style) return (sheetText ? sheetText + "!" : "") + "R" + rowStr + "C" + col; const absCol = absNum === 1 || absNum === 2 ? "$" + colStr : colStr; const absRow = absNum === 1 || absNum === 3 ? "$" + rowStr : rowStr; return (sheetText ? sheetText + "!" : "") + absCol + absRow; }
+  if (fn === "CHOOSE") {
+    const index = Math.round(firstNumericFormulaArg(state, args[0] ?? "1", sheet, new Set()) ?? 1);
+    if (index < 1 || index >= args.length) return undefined;
+    return resolveText(args[index] ?? "");
+  }
+  if (fn === "SWITCH") {
+    const val = resolveScalarValue(state, args[0] ?? "", sheet);
+    for (let i = 1; i + 1 < args.length; i += 2) {
+      const candidate = resolveScalarValue(state, args[i] ?? "", sheet);
+      if (candidate === val) return resolveText(args[i + 1] ?? "");
+    }
+    if (args.length % 2 === 0) return resolveText(args[args.length - 1] ?? "");
+    return undefined;
+  }
   return undefined;
 }
 
@@ -6335,4 +6418,310 @@ function escapeXml(value: string) {
 
 function escapeXmlForRegex(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// ==================== Named Range Resolution ====================
+
+/**
+ * Resolves a named range's reference chain, tracking nested named range references.
+ * Returns a resolution object with the fully resolved reference and the chain of names.
+ */
+export function resolveNamedRangeChain(
+  state: ExcelWorkbookState,
+  name: string,
+): ExcelNamedRangeResolution {
+  const chain: string[] = [];
+  const visited = new Set<string>();
+
+  const resolve = (rangeName: string, currentRef: string): { ref: string; chain: string[] } => {
+    if (visited.has(rangeName.toLowerCase())) {
+      throw new OfficekitError(`Circular reference detected in named range '${rangeName}'.`, "circular_reference");
+    }
+    visited.add(rangeName.toLowerCase());
+    chain.push(rangeName);
+
+    // Check if the reference contains other named ranges
+    const namedRangeMatch = currentRef.match(/^([A-Za-z_][A-Za-z0-9_]*)$/);
+    if (namedRangeMatch) {
+      const referencedName = namedRangeMatch[1];
+      const referencedRange = state.namedRanges.find(
+        (r) => r.name.toLowerCase() === referencedName.toLowerCase(),
+      );
+      if (referencedRange) {
+        return resolve(referencedRange.name, referencedRange.ref);
+      }
+    }
+
+    return { ref: currentRef, chain: [...chain] };
+  };
+
+  const range = state.namedRanges.find((r) => r.name.toLowerCase() === name.toLowerCase());
+  if (!range) {
+    throw new OfficekitError(`Named range '${name}' not found.`, "not_found");
+  }
+
+  const result = resolve(range.name, range.ref);
+  return {
+    name: range.name,
+    ref: range.ref,
+    resolvedRef: result.ref,
+    chain: result.chain,
+  };
+}
+
+/**
+ * Calculates the values of cells within a named range.
+ * Returns a 2D array of values with optional summary statistics.
+ */
+export function calculateNamedRangeValues(
+  state: ExcelWorkbookState,
+  name: string,
+): ExcelNamedRangeValue {
+  const resolution = resolveNamedRangeChain(state, name);
+  const { ref } = resolution;
+
+  // Parse the resolved reference (e.g., "Sheet1!A1:C10")
+  const refMatch = /^([^!]+)!([A-Z]+)(\d+):([A-Z]+)(\d+)$/i.exec(ref);
+  if (!refMatch) {
+    throw new OfficekitError(`Invalid range reference format '${ref}'.`, "invalid_reference");
+  }
+
+  const [, sheetName, startCol, startRowStr, endCol, endRowStr] = refMatch;
+  const startRow = parseInt(startRowStr, 10);
+  const endRow = parseInt(endRowStr, 10);
+
+  const sheet = state.sheets.find((s) => s.name.toLowerCase() === sheetName.toLowerCase());
+  if (!sheet) {
+    throw new OfficekitError(`Sheet '${sheetName}' not found.`, "not_found");
+  }
+
+  const startColIndex = colToIndex(startCol);
+  const endColIndex = colToIndex(endCol);
+
+  const values: (number | string | boolean | null)[][] = [];
+  let numericSum = 0;
+  let count = 0;
+  let minVal = Infinity;
+  let maxVal = -Infinity;
+
+  for (let row = startRow; row <= endRow; row++) {
+    const rowValues: (number | string | boolean | null)[] = [];
+    for (let col = startColIndex; col <= endColIndex; col++) {
+      const cellRef = `${indexToColumnName(col)}${row}`;
+      const cell = sheet.cells[cellRef];
+      let value: number | string | boolean | null = null;
+
+      if (cell) {
+        if (cell.value !== undefined && cell.value !== "") {
+          const numValue = Number(cell.value);
+          if (!Number.isNaN(numValue) && cell.type !== "string") {
+            value = numValue;
+            numericSum += numValue;
+            count++;
+            if (numValue < minVal) minVal = numValue;
+            if (numValue > maxVal) maxVal = numValue;
+          } else if (cell.type === "boolean") {
+            value = cell.value.toLowerCase() === "true";
+          } else {
+            value = cell.value;
+          }
+        }
+      }
+      rowValues.push(value);
+    }
+    values.push(rowValues);
+  }
+
+  const summary = count > 0
+    ? {
+        sum: numericSum,
+        count,
+        average: numericSum / count,
+        min: minVal === Infinity ? undefined : minVal,
+        max: maxVal === -Infinity ? undefined : maxVal,
+      }
+    : undefined;
+
+  return {
+    name,
+    ref,
+    values,
+    summary,
+  };
+}
+
+// ==================== Pivot Table Field Management ====================
+
+/**
+ * Adds or updates fields in a pivot table.
+ * Props can include: rowFields, colFields, dataFields, pageFields (comma-separated field indices or names)
+ */
+function setPivotTableFields(
+  state: ExcelWorkbookState,
+  sheet: ExcelSheetModel,
+  pivotIndex: number,
+  props: Record<string, string>,
+): ExcelPivotTableModel {
+  const pivot = getSheetPivots(state, sheet)[pivotIndex - 1];
+  if (!pivot) {
+    throw new OfficekitError(`Pivot table ${pivotIndex} does not exist.`, "not_found");
+  }
+
+  const xmlPath = normalizeZipPath(path.posix.dirname(sheet.entryName), pivot.path);
+  let xml = requireEntry(state.zip, xmlPath);
+
+  // Parse existing pivot table to understand its structure
+  const location = parseAttr(xml, "location") ?? "";
+  const source = parseAttr(xml, "source") ?? "";
+
+  // Build field assignment XML based on props
+  let fieldXml = "";
+
+  if (props.rowFields !== undefined || props.rowfields !== undefined) {
+    const fields = (props.rowFields ?? props.rowfields ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+    if (fields.length > 0) {
+      fieldXml += `\n  <rowFields>`;
+      fields.forEach((field, idx) => {
+        fieldXml += `\n    <field idx="${field}"/>`;
+      });
+      fieldXml += `\n  </rowFields>`;
+    }
+  }
+
+  if (props.colFields !== undefined || props.colfields !== undefined) {
+    const fields = (props.colFields ?? props.colfields ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+    if (fields.length > 0) {
+      fieldXml += `\n  <colFields>`;
+      fields.forEach((field) => {
+        fieldXml += `\n    <field idx="${field}"/>`;
+      });
+      fieldXml += `\n  </colFields>`;
+    }
+  }
+
+  if (props.dataFields !== undefined || props.datafields !== undefined) {
+    const fields = (props.dataFields ?? props.datafields ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+    if (fields.length > 0) {
+      fieldXml += `\n  <dataFields>`;
+      fields.forEach((field, idx) => {
+        fieldXml += `\n    <field idx="${field}" name="Data${idx + 1}"/>`;
+      });
+      fieldXml += `\n  </dataFields>`;
+    }
+  }
+
+  if (props.pageFields !== undefined || props.pagefields !== undefined) {
+    const fields = (props.pageFields ?? props.pagefields ?? "").split(",").map((f) => f.trim()).filter(Boolean);
+    if (fields.length > 0) {
+      fieldXml += `\n  <pageFields>`;
+      fields.forEach((field) => {
+        fieldXml += `\n    <field idx="${field}"/>`;
+      });
+      fieldXml += `\n  </pageFields>`;
+    }
+  }
+
+  // Update the pivot table XML
+  if (fieldXml) {
+    // Check if there's an existing pivotTableDefinition that needs to be expanded
+    if (xml.endsWith("/>")) {
+      // Self-closing tag - expand it
+      const attrs = xml.match(/<pivotTableDefinition([^>]*)\/>/)?.[1] ?? "";
+      xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<pivotTableDefinition${attrs}>${fieldXml}\n</pivotTableDefinition>`;
+    } else {
+      // Already has content - append fields
+      xml = xml.replace(/<\/pivotTableDefinition>/, `${fieldXml}\n</pivotTableDefinition>`);
+    }
+    state.zip.set(xmlPath, Buffer.from(xml, "utf8"));
+  }
+
+  // Return updated pivot info
+  return {
+    ...pivot,
+    ...(props.name !== undefined ? { name: props.name } : {}),
+    location,
+    source,
+    fields: parsePivotFields(xml),
+  };
+}
+
+/**
+ * Refreshes a pivot table by marking it for recalculation on next open.
+ * This is done by removing the "refreshed" attribute or updating the cacheId.
+ */
+export function refreshPivotTable(
+  state: ExcelWorkbookState,
+  sheet: ExcelSheetModel,
+  pivotIndex: number,
+): void {
+  const pivot = getSheetPivots(state, sheet)[pivotIndex - 1];
+  if (!pivot) {
+    throw new OfficekitError(`Pivot table ${pivotIndex} does not exist.`, "not_found");
+  }
+
+  const xmlPath = normalizeZipPath(path.posix.dirname(sheet.entryName), pivot.path);
+  let xml = requireEntry(state.zip, xmlPath);
+
+  // Add or update the refreshFlag attribute to force recalculation
+  if (/refreshed="[^"]*"/.test(xml)) {
+    xml = xml.replace(/refreshed="[^"]*"/, 'refreshed="1"');
+  } else {
+    xml = xml.replace(/<pivotTableDefinition\b/, '<pivotTableDefinition refreshed="1"');
+  }
+
+  state.zip.set(xmlPath, Buffer.from(xml, "utf8"));
+}
+
+/**
+ * Parses pivot table fields from XML
+ */
+function parsePivotFields(xml: string): ExcelPivotTableField[] {
+  const fields: ExcelPivotTableField[] = [];
+
+  // Parse pivotFields
+  const fieldMatches = [...xml.matchAll(/<pivotField\b[^>]*name="([^"]*)"[^>]*>/g)];
+  fieldMatches.forEach((match, index) => {
+    fields.push({
+      name: match[1],
+      index,
+    });
+  });
+
+  // Parse rowFields
+  const rowFieldMatches = [...xml.matchAll(/<rowFields>[\s\S]*?<field idx="(\d+)"[\s\S]*?<\/rowFields>/g)];
+  rowFieldMatches.forEach((match) => {
+    const idx = parseInt(match[1], 10);
+    if (fields[idx]) {
+      fields[idx].axis = "row";
+    }
+  });
+
+  // Parse colFields
+  const colFieldMatches = [...xml.matchAll(/<colFields>[\s\S]*?<field idx="(\d+)"[\s\S]*?<\/colFields>/g)];
+  colFieldMatches.forEach((match) => {
+    const idx = parseInt(match[1], 10);
+    if (fields[idx]) {
+      fields[idx].axis = "col";
+    }
+  });
+
+  // Parse dataFields
+  const dataFieldMatches = [...xml.matchAll(/<dataFields>[\s\S]*?<field idx="(\d+)"[^>]*name="([^"]*)"[\s\S]*?<\/dataFields>/g)];
+  dataFieldMatches.forEach((match) => {
+    const idx = parseInt(match[1], 10);
+    if (fields[idx]) {
+      fields[idx].axis = "data";
+    }
+  });
+
+  // Parse pageFields
+  const pageFieldMatches = [...xml.matchAll(/<pageFields>[\s\S]*?<field idx="(\d+)"[\s\S]*?<\/pageFields>/g)];
+  pageFieldMatches.forEach((match) => {
+    const idx = parseInt(match[1], 10);
+    if (fields[idx]) {
+      fields[idx].axis = "page";
+    }
+  });
+
+  return fields;
 }
