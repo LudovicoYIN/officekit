@@ -1,11 +1,5 @@
 import type { SupportedFormat } from "./formats.js";
 
-export const officeCliLineageStatement =
-  "officekit is a Node.js + Bun migration of OfficeCLI; v1 targets capability parity except MCP.";
-
-export const excludedCapabilityFamilies = ["mcp"] as const;
-export type ExcludedCapabilityFamily = (typeof excludedCapabilityFamilies)[number];
-
 export const capabilityFamilies = [
   "create",
   "add",
@@ -15,8 +9,15 @@ export const capabilityFamilies = [
   "remove",
   "view",
   "raw",
+  "raw-set",
+  "add-part",
+  "merge",
   "watch",
+  "unwatch",
+  "open",
+  "close",
   "check",
+  "validate",
   "import",
   "batch",
   "install",
@@ -43,7 +44,7 @@ export interface CapabilityLedgerEntry {
   capability: CapabilityFamily;
   ownerPackage: PackageLane | readonly PackageLane[];
   verificationLayer: "unit" | "integration" | "preview" | "docs" | "parity";
-  status: "scaffolded" | "planned";
+  status: "scaffolded" | "planned" | "implemented";
   notes: string;
 }
 
@@ -52,50 +53,50 @@ export const capabilityLedger: readonly CapabilityLedgerEntry[] = [
     capability: "create",
     ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "CLI and shared routing contracts are scaffolded; format-specific document creation lands in format packages.",
+    status: "implemented",
+    notes: "Format packages handle document creation; CLI routing is in place.",
   },
   {
     capability: "add",
     ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "Verb contract is registered with parity-aware routing; mutations are deferred to format packages.",
+    status: "implemented",
+    notes: "Format packages handle add mutations for paragraphs, runs, tables, and other elements.",
   },
   {
     capability: "set",
     ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "Shared command routing exists so property mutation semantics can be validated consistently later.",
+    status: "implemented",
+    notes: "Format packages handle property mutations for all supported document types.",
   },
   {
     capability: "get",
     ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "Read-oriented command contracts are wired and emit execution plans in scaffold mode.",
+    status: "implemented",
+    notes: "Read-oriented command contracts emit execution plans backed by format package implementations.",
   },
   {
     capability: "query",
     ownerPackage: ["packages/cli", "packages/core", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "Selector/query semantics are reserved for shared core plus format adapters.",
+    status: "implemented",
+    notes: "Selector/query semantics are backed by shared core and format adapter implementations.",
   },
   {
     capability: "remove",
     ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "integration",
-    status: "scaffolded",
-    notes: "Mutation verb is routed, but document changes remain unimplemented pending format packages.",
+    status: "implemented",
+    notes: "Format packages handle remove mutations for paragraphs, runs, tables, and other elements.",
   },
   {
     capability: "view",
     ownerPackage: ["packages/cli", "packages/preview", "packages/word", "packages/excel", "packages/ppt"],
     verificationLayer: "preview",
-    status: "scaffolded",
-    notes: "Preview/view flows are explicitly reserved for the preview lane while keeping CLI contracts stable.",
+    status: "implemented",
+    notes: "Preview/view flows are backed by preview lane and format package implementations.",
   },
   {
     capability: "raw",
@@ -108,15 +109,57 @@ export const capabilityLedger: readonly CapabilityLedgerEntry[] = [
     capability: "watch",
     ownerPackage: ["packages/cli", "packages/preview"],
     verificationLayer: "preview",
+    status: "implemented",
+    notes: "Watch preview server is backed by preview lane implementation.",
+  },
+  {
+    capability: "unwatch",
+    ownerPackage: ["packages/cli", "packages/preview"],
+    verificationLayer: "preview",
     status: "scaffolded",
-    notes: "Watch is modeled as a preview lane capability with a stable CLI entry point.",
+    notes: "Unwatch stops the watch preview server for a document.",
+  },
+  {
+    capability: "open",
+    ownerPackage: ["packages/cli", "packages/core"],
+    verificationLayer: "integration",
+    status: "scaffolded",
+    notes: "Open starts a resident process to keep the document in memory for faster subsequent commands.",
+  },
+  {
+    capability: "close",
+    ownerPackage: ["packages/cli", "packages/core"],
+    verificationLayer: "integration",
+    status: "scaffolded",
+    notes: "Close stops the resident process for the document.",
+  },
+  {
+    capability: "raw-set",
+    ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
+    verificationLayer: "integration",
+    status: "scaffolded",
+    notes: "Raw-set modifies raw XML in a document part using XPath.",
+  },
+  {
+    capability: "add-part",
+    ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
+    verificationLayer: "integration",
+    status: "scaffolded",
+    notes: "Add-part creates a new document part (chart, header, footer) and returns its relationship ID.",
+  },
+  {
+    capability: "merge",
+    ownerPackage: ["packages/cli", "packages/word", "packages/excel", "packages/ppt"],
+    verificationLayer: "integration",
+    status: "scaffolded",
+    notes: "Merge replaces {{key}} placeholders in a template document with data values.",
   },
   {
     capability: "check",
     ownerPackage: ["packages/cli", "packages/core", "packages/parity-tests"],
     verificationLayer: "parity",
-    status: "scaffolded",
-    notes: "Parity/check command surface is reserved for verification and inventory output.",
+    status: "implemented",
+    notes: "Parity/check command surface backed by verification and inventory output.",
   },
   {
     capability: "import",
@@ -164,12 +207,11 @@ export const capabilityLedger: readonly CapabilityLedgerEntry[] = [
 
 export function summarizeParity() {
   return {
-    lineage: officeCliLineageStatement,
     supportedFormats: ["word", "excel", "powerpoint"] satisfies readonly SupportedFormat[],
-    excluded: excludedCapabilityFamilies,
     capabilityCount: capabilityLedger.length,
     scaffoldedCount: capabilityLedger.filter((entry) => entry.status === "scaffolded").length,
     plannedCount: capabilityLedger.filter((entry) => entry.status === "planned").length,
+    implementedCount: capabilityLedger.filter((entry) => entry.status === "implemented").length,
     ledger: capabilityLedger,
   };
 }

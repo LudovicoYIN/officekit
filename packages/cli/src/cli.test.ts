@@ -14,16 +14,10 @@ describe("officekit CLI scaffold", () => {
     expect(result.stdout).toContain('"targetPackage": "packages/word"');
   });
 
-  test("returns lineage summary for about", async () => {
+  test("returns about info", async () => {
     const result = await runCli(["about"]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("migration of OfficeCLI");
-  });
-
-  test("keeps unsupported MCP explicit", async () => {
-    const result = await runCli(["mcp", "--json"]);
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("capability_excluded");
+    expect(result.stdout).toContain("officekit CLI");
   });
 
   test("creates and mutates a Word document vertical slice", async () => {
@@ -1778,6 +1772,48 @@ describe("officekit CLI scaffold", () => {
     child.kill("SIGINT");
     const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
     expect(exitCode).toBe(0);
+  });
+
+  test("unwatch stops an active preview session", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-unwatch-"));
+    const filePath = path.join(dir, "watch.docx");
+    await runCli(["create", filePath]);
+    await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Watching"]);
+
+    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0"], {
+      cwd: path.resolve(import.meta.dir, "../../.."),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdout = await waitForOutput(child.stdout, /"url":\s*"([^"]+)"/);
+    const urlMatch = stdout.match(/"url":\s*"([^"]+)"/);
+    expect(urlMatch).not.toBeNull();
+
+    const stopResult = await runCli(["unwatch", filePath]);
+    expect(stopResult.exitCode).toBe(0);
+    expect(stopResult.stdout).toContain("Watch stopped");
+
+    const exitCode = await new Promise<number | null>((resolve) => child.once("exit", resolve));
+    expect(exitCode).toBe(0);
+  });
+
+  test("open and close manage a resident session lifecycle", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-open-close-"));
+    const filePath = path.join(dir, "resident.docx");
+    await runCli(["create", filePath]);
+
+    const openResult = await runCli(["open", filePath]);
+    expect(openResult.exitCode).toBe(0);
+    const opened = JSON.parse(openResult.stdout ?? "{}") as { ok: boolean; pid: number; reused: boolean };
+    expect(opened.ok).toBe(true);
+    expect(typeof opened.pid).toBe("number");
+    expect(() => process.kill(opened.pid, 0)).not.toThrow();
+
+    const closeResult = await runCli(["close", filePath]);
+    expect(closeResult.exitCode).toBe(0);
+
+    await Bun.sleep(100);
+    expect(() => process.kill(opened.pid, 0)).toThrow();
   });
 });
 

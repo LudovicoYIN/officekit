@@ -26,7 +26,7 @@ export async function runCli(rawArgv: string[]): Promise<CommandResult> {
   if (command === "about") {
     return {
       exitCode: 0,
-      stdout: summarizeParity().lineage,
+      stdout: "officekit CLI - Node.js/Bun implementation for Office document manipulation",
     };
   }
 

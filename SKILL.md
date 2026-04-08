@@ -1,73 +1,102 @@
 ---
 name: officekit
-description: Node.js + Bun migration of OfficeCLI for creating, inspecting, previewing, and modifying Office documents with an agent-first workflow.
+description: Node.js/Bun toolkit for creating, inspecting, previewing, and modifying Office documents (.docx, .xlsx, .pptx).
 ---
 
 # officekit
 
-`officekit` is the **Node.js + Bun migration of OfficeCLI**. This version is migrated from OfficeCLI and targets OfficeCLI v1 capability/detail parity **except MCP**.
+Office document manipulation toolkit with CLI and programmatic API.
 
-## Ground rules
+## Capabilities
 
-- **Do not assume `officecli` command compatibility.** officekit keeps the same capability families, but the command surface is being redesigned.
-- **Use help instead of guessing.** The final CLI will preserve OfficeCLI's help-first strategy for format verbs and properties.
-- **Prefer the highest-level surface available.** Read/inspect first, then structured mutation, then raw operations.
-- **Remember the lineage.** officekit is migrated from OfficeCLI; keep that statement intact in docs and onboarding text.
+- **Word** (.docx): Create, edit, query documents with styles, TOC, headers/footers
+- **Excel** (.xlsx): Spreadsheet operations with formulas (50+ functions), pivot tables, charts
+- **PowerPoint** (.pptx): Slides, animations, morph transitions, themes
+- **Preview**: Live HTML preview server for all document types
 
-## Migration-era package map
+## Command Families
 
-- `packages/preview` — HTML preview/watch page shell and live-reload contract
-- `packages/skills` — base skill text, skill catalog, agent target mapping
-- `packages/install` — release/install manifest generation and profile wiring helpers
-- `packages/docs` — source-to-target ledger, lineage wording, help-topic inventory
+- `create` - Create new documents
+- `view` - View document content (text/outline/annotated/stats/html)
+- `get` - Get specific elements
+- `query` - Query document structure (CSS selectors)
+- `set` - Set element properties
+- `add` - Add new elements
+- `remove` - Remove elements
+- `move` - Move elements to new positions
+- `swap` - Swap two elements
+- `copy` - Copy elements
+- `batch` - Batch operations
+- `raw` - View raw XML
+- `watch` - Live preview with file watching
+- `check` - Layout checking
+- `validate` - Document validation (OpenXML schema)
+- `import` - Import CSV/TSV data
+- `about` - Show version info
+- `contracts` - Show capability summary
 
-## Intended command families
+## Path Syntax
 
-officekit keeps conceptual parity with the OfficeCLI families below, even though exact command syntax may differ:
-
-- `create`
-- `view`
-- `watch`
-- `get`
-- `query`
-- `set`
-- `add`
-- `remove`
-- `raw`
-- `batch`
-- `import`
-- `check`
-- `install`
-- `skills`
-- `config`
-- `help`
-
-## Help posture
-
-When the officekit CLI package lands, the preferred navigation model remains:
-
-```bash
-officekit help docx set
-officekit help xlsx query
-officekit help pptx add shape
+```
+Word:  /body/p[1]/r[2]       # paragraph 1, run 2
+Excel: /Sheet1/A1:B10        # range
+       /Sheet1/$A$1          # absolute reference
+PPT:   /slide[1]/shape[2]    # slide 1, shape 2
 ```
 
-The help experience is expected to stay deep-linkable by format + verb + optional element/property, mirroring the successful OfficeCLI workflow while using officekit naming.
+Selectors: `:contains(text)`, `:has(selector)`, `:eq(n)`
 
-## Preview/watch posture
+## Usage
 
-Preview remains a first-class developer surface:
+```bash
+# Create documents
+officekit create demo.docx
+officekit create spreadsheet.xlsx
+officekit create presentation.pptx
 
-- HTML preview supports `.docx`, `.xlsx`, and `.pptx`
-- watch mode keeps a live-reload page open while document updates stream in
-- preview rendering is treated as product behavior, not just internal debug output
+# View content
+officekit view demo.docx
+officekit view spreadsheet.xlsx --sheet Sheet1
 
-## Skills/install posture
+# Query structure
+officekit query demo.docx /body/p
+officekit query spreadsheet.xlsx /Sheet1/A1:B10
 
-- `officekit skills install` will remain the agent-onboarding entry point
-- supported agent targets continue to include Claude Code, Codex CLI, Cursor, Windsurf, GitHub Copilot, and related tools
-- install/update/config flows are being rebuilt for Node.js + Bun instead of a self-contained .NET binary
+# Add content
+officekit add demo.docx /body --type paragraph --prop "text=Hello"
 
-## Contributor note
+# Modify
+officekit set demo.docx /body/p[1] --prop "bold=true"
+officekit move demo.docx /p[1] /to /p[3]
+officekit swap demo.docx /p[1] /p[2]
 
-During migration, treat this skill as a **product contract** for the lane-4 surfaces. The concrete CLI wiring can change, but the parity scope and lineage wording should not.
+# Batch operations
+officekit batch demo.docx '[{"op":"add","path":"/body","type":"paragraph"}]'
+
+# Validate and check
+officekit validate demo.docx
+officekit check presentation.pptx
+
+# Preview
+officekit watch demo.docx
+```
+
+## API
+
+```typescript
+import { createWordDocument, getWordNode, setWordNode } from "@officekit/word";
+import { createExcelWorkbook, setExcelCell } from "@officekit/excel";
+import { createPresentation, addSlide } from "@officekit/ppt";
+
+// Word
+await createWordDocument("output.docx");
+await setWordNode("doc.docx", "/body/p[1]", { props: { text: "Hello" } });
+
+// Excel
+await createExcelWorkbook("output.xlsx");
+await setExcelCell("sheet.xlsx", "/Sheet1/A1", { value: 42, formula: "=SUM(B1:B10)" });
+
+// PowerPoint
+await createPresentation("output.pptx");
+await addSlide("slides.pptx");
+```

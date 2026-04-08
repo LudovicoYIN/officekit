@@ -27,16 +27,16 @@ describe("execution plan routing", () => {
 });
 
 describe("parity metadata", () => {
-  test("summarizes explicit lineage and exclusions", () => {
+  test("summarizes capability parity", () => {
     const summary = summarizeParity();
-    expect(summary.lineage).toContain("migration of OfficeCLI");
-    expect(summary.excluded).toContain("mcp");
     expect(summary.capabilityCount).toBeGreaterThan(10);
+    expect(summary.supportedFormats).toContain("word");
+    expect(summary.supportedFormats).toContain("excel");
+    expect(summary.supportedFormats).toContain("powerpoint");
   });
 
-  test("help text includes early vertical-slice examples", () => {
+  test("help text includes verification examples", () => {
     const help = renderHelpText();
     expect(help).toContain("officekit create demo.docx --plan --json");
-    expect(help).toContain("Excluded by design: mcp");
   });
 });

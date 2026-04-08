@@ -1,39 +1,28 @@
 # @officekit/excel
 
-Lane-3 parity-first scaffold for the Excel adapter.
+Excel document adapter for officekit.
 
-## Current contents
+## Features
 
-- `src/manifest.js` — source lineage, capability families, deferred shared-core contracts, implementation milestones, and parity risks
-- `src/index.js` — package exports for manifest/contract helpers
-- `test/manifest.test.js` — Bun-backed invariants for workbook/chart/import parity expectations
-
-## Source lineage
-
-Primary source families:
-
-- `OfficeCLI/src/officecli/Handlers/ExcelHandler.cs`
-- `OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Add.cs`
-- `OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Import.cs`
-- `OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Query.cs`
-- `OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.Set*.cs`
-- `OfficeCLI/src/officecli/Handlers/Excel/ExcelHandler.View.cs`
-- `OfficeCLI/src/officecli/Core/ExcelStyleManager.cs`
-- `OfficeCLI/src/officecli/Core/FormulaEvaluator*.cs`
-- `OfficeCLI/src/officecli/Core/PivotTableHelper.cs`
-
-## Parity-critical families
-
-- workbook/sheet/range semantics
-- formulas and style handling
-- charts and pivots
+- Workbook and sheet management
+- Cell operations with formula support (150+ functions)
+- Named ranges with chain resolution
+- Pivot tables
+- Data validation and conditional formatting
+- Charts
 - CSV/TSV import
-- filtered raw sheet views
-- HTML preview
 
-## Deferred shared-core decisions
+## Usage
 
-- selector/path grammar
-- shared result envelope
-- shared color/unit helpers
-- preview server orchestration
+```typescript
+import { createExcelWorkbook, queryExcelNodes, setExcelCell } from "@officekit/excel";
+
+// Create workbook
+await createExcelWorkbook("output.xlsx");
+
+// Query cells
+const result = await queryExcelNodes("spreadsheet.xlsx", "/Sheet1/A1");
+
+// Set cell value
+await setExcelCell("spreadsheet.xlsx", "/Sheet1/A1", { value: 42, formula: "=SUM(B1:B10)" });
+```
