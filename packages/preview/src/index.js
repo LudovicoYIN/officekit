@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import http from "node:http";
+import { removeSessionRecord, writeSessionRecord } from "../../core/src/session-registry.js";
 
 const DEFAULT_WAITING_MESSAGE = "Waiting for first update...";
 const PREVIEW_PORT_MIN = 20000;
@@ -351,6 +352,14 @@ export async function startPreviewSession({
   };
 
   await rerender("initial");
+  await writeSessionRecord("watch", filePath, {
+    kind: "watch",
+    filePath,
+    pid: process.pid,
+    url: server.url,
+    port: server.port,
+    startedAt: new Date().toISOString(),
+  });
 
   const watcher = fs.watch(filePath, { persistent: false }, () => {
     if (timer) clearTimeout(timer);
@@ -365,6 +374,7 @@ export async function startPreviewSession({
     close: async () => {
       watcher.close();
       if (timer) clearTimeout(timer);
+      await removeSessionRecord("watch", filePath);
       await server.close();
     },
   };

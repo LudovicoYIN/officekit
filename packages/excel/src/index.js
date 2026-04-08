@@ -24,4 +24,13 @@ export {
   summarizeExcelCheck,
   validateExcelDocument,
   viewExcelDocument,
+  refreshPivotTable,
+  resolveNamedRangeChain,
+  calculateNamedRangeValues,
 } from "./adapter.ts";
+
+export {
+  FormulaEvaluator,
+  FormulaResult,
+  RangeData,
+} from "./formula.ts";

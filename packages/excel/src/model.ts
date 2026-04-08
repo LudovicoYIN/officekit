@@ -78,6 +78,43 @@ export interface ExcelPivotTableModel {
   name?: string;
   target?: string;
   cacheId?: string;
+  source?: string;
+  location?: string;
+  rowGrandTotals?: boolean;
+  colGrandTotals?: boolean;
+  compact?: boolean;
+  compactData?: boolean;
+  outline?: boolean;
+  fields?: ExcelPivotTableField[];
+}
+
+export interface ExcelPivotTableField {
+  name: string;
+  axis?: "row" | "col" | "page" | "data" | "values";
+  index?: number;
+  subtotals?: string[];
+  sortItem?: { type: "manual" | "ascending" | "descending"; val?: string };
+}
+
+export interface ExcelNamedRangeResolution {
+  name: string;
+  ref: string;
+  resolvedRef: string;
+  chain: string[];
+  value?: number | string | boolean | null;
+}
+
+export interface ExcelNamedRangeValue {
+  name: string;
+  ref: string;
+  values: (number | string | boolean | null)[][];
+  summary?: {
+    sum?: number;
+    count?: number;
+    average?: number;
+    min?: number;
+    max?: number;
+  };
 }
 
 export interface ExcelSparklineModel {

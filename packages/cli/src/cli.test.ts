@@ -1815,6 +1815,89 @@ describe("officekit CLI scaffold", () => {
     await Bun.sleep(100);
     expect(() => process.kill(opened.pid, 0)).toThrow();
   });
+
+  test("merge supports Word OOXML templates", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-merge-word-"));
+    const templatePath = path.join(dir, "template.docx");
+    const outputPath = path.join(dir, "output.docx");
+    await writeFile(templatePath, buildExternalWordZip("Hello {{name}}"));
+
+    const result = await runCli(["merge", templatePath, outputPath, "--data", '{"name":"OfficeCLI"}']);
+    const merged = await runCli(["get", outputPath, "/body/p[1]", "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"replacements": 1');
+    expect(merged.stdout).toContain("Hello OfficeCLI");
+  });
+
+  test("merge supports Excel OOXML templates", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-merge-excel-"));
+    const templatePath = path.join(dir, "template.xlsx");
+    const outputPath = path.join(dir, "output.xlsx");
+    await writeFile(templatePath, buildExternalExcelTemplateZip("Hello {{name}}"));
+
+    const result = await runCli(["merge", templatePath, outputPath, "--data", '{"name":"OfficeCLI"}']);
+    const merged = await runCli(["get", outputPath, "/Sheet1/A1", "--json"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('"replacements": 1');
+    expect(merged.stdout).toContain('"value": "Hello OfficeCLI"');
+  });
+
+  test("add-part supports Word, Excel, and PowerPoint chart/header flows", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "officekit-add-part-"));
+
+    const wordPath = path.join(dir, "part.docx");
+    await runCli(["create", wordPath]);
+    const wordHeader = await runCli(["add-part", wordPath, "/", "--type", "header", "--prop", "text=Header copy"]);
+    expect(wordHeader.exitCode).toBe(0);
+    expect(wordHeader.stdout).toContain("/header[1]");
+
+    const excelPath = path.join(dir, "part.xlsx");
+    await runCli(["create", excelPath]);
+    await runCli(["set", excelPath, "/Sheet1/A1", "--prop", "value=Metric"]);
+    await runCli(["set", excelPath, "/Sheet1/B1", "--prop", "value=Q1"]);
+    await runCli(["set", excelPath, "/Sheet1/A2", "--prop", "value=Revenue"]);
+    await runCli(["set", excelPath, "/Sheet1/B2", "--prop", "value=10", "--prop", "type=number"]);
+    const excelChart = await runCli([
+      "add-part",
+      excelPath,
+      "/Sheet1",
+      "--type",
+      "chart",
+      "--prop",
+      "title=Quarterly",
+      "--prop",
+      "dataRange=Sheet1!A1:B2",
+    ]);
+    expect(excelChart.exitCode).toBe(0);
+    expect(excelChart.stdout).toContain("/Sheet1/chart[1]");
+
+    const pptPath = path.join(dir, "part.pptx");
+    await runCli(["create", pptPath]);
+    await runCli(["add", pptPath, "/", "--type", "slide", "--prop", "title=Roadmap"]);
+    const pptChart = await runCli([
+      "add-part",
+      pptPath,
+      "/slide[1]",
+      "--type",
+      "chart",
+      "--prop",
+      "title=Launch Chart",
+      "--prop",
+      "categories=Q1,Q2,Q3",
+      "--prop",
+      "values=1,2,3",
+    ]);
+    const pptZip = readStoredZip(await readFile(pptPath));
+    const pptChartXml = [...pptZip.entries()]
+      .find(([name]) => name.endsWith(".xml") && name.includes("/charts/"))?.[1]
+      ?.toString("utf8") ?? "";
+
+    expect(pptChart.exitCode).toBe(0);
+    expect(pptChart.stdout).toContain("/slide[1]/chart[1]");
+    expect(pptChartXml).toContain("Launch Chart");
+  });
 });
 
 function buildExternalWordZip(text: string) {
@@ -2224,6 +2307,62 @@ function buildExternalExcelSheetExtrasZip() {
   <headerFooter><oddHeader>&amp;LHeader Left</oddHeader><oddFooter>&amp;RFooter Right</oddFooter></headerFooter>
   <rowBreaks count="1" manualBreakCount="1"><brk id="5" man="1"/></rowBreaks>
   <colBreaks count="1" manualBreakCount="1"><brk id="2" man="1"/></colBreaks>
+</worksheet>`),
+    },
+  ]);
+}
+
+function buildExternalExcelTemplateZip(text: string) {
+  return createStoredZip([
+    {
+      name: "[Content_Types].xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`),
+    },
+    {
+      name: "_rels/.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/workbook.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`),
+    },
+    {
+      name: "xl/_rels/workbook.xml.rels",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+</Relationships>`),
+    },
+    {
+      name: "xl/sharedStrings.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1">
+  <si><t>${text}</t></si>
+</sst>`),
+    },
+    {
+      name: "xl/worksheets/sheet1.xml",
+      data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+  </sheetData>
 </worksheet>`),
     },
   ]);
