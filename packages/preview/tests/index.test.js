@@ -24,6 +24,8 @@ describe("preview package", () => {
     expect(html).toContain("<title>Demo</title>");
     expect(html).toContain("EventSource(\"/events\")");
     expect(html).toContain("<article>Hello</article>");
+    expect(html).toContain('id="preview-status"');
+    expect(html).toContain('id="preview-refresh"');
   });
 
   test("preview server updates the root document through POST messages", async () => {

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import http from "node:http";
+import { spawn } from "node:child_process";
 import { removeSessionRecord, writeSessionRecord } from "../../core/src/session-registry.js";
 
 const DEFAULT_WAITING_MESSAGE = "Waiting for first update...";
@@ -27,32 +28,67 @@ export function buildPreviewHtml({
       :root { color-scheme: light dark; }
       html, body { margin: 0; min-height: 100%; font-family: Inter, system-ui, sans-serif; background: #0b1020; color: #f6f8fc; }
       body { display: grid; grid-template-rows: auto 1fr; }
-      header { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.12); background: rgba(9,13,28,0.92); position: sticky; top: 0; }
+      header { padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.12); background: rgba(9,13,28,0.92); position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .header-copy { min-width: 0; }
       main { padding: 20px; }
       .waiting { display: grid; place-items: center; min-height: 50vh; opacity: 0.75; border: 1px dashed rgba(255,255,255,0.18); border-radius: 16px; }
       .meta { font-size: 12px; opacity: 0.72; }
+      .toolbar { display: flex; align-items: center; gap: 10px; }
+      .status-pill { border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 4px 10px; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; }
+      .status-pill[data-state="live"] { color: #9ff7c2; border-color: rgba(159,247,194,0.35); }
+      .status-pill[data-state="stale"] { color: #ffd479; border-color: rgba(255,212,121,0.35); }
+      .status-pill[data-state="offline"] { color: #ff9a9a; border-color: rgba(255,154,154,0.35); }
+      .toolbar button { appearance: none; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06); color: inherit; border-radius: 999px; padding: 6px 10px; font: inherit; cursor: pointer; }
+      .toolbar button:hover { background: rgba(255,255,255,0.1); }
     </style>
   </head>
   <body>
     <header>
-      <strong>${escapeHtml(title)}</strong>
-      <div class="meta">Live preview powered by officekit/packages/preview</div>
+      <div class="header-copy">
+        <strong>${escapeHtml(title)}</strong>
+        <div class="meta">Live preview powered by officekit/packages/preview</div>
+      </div>
+      <div class="toolbar">
+        <span id="preview-status" class="status-pill" data-state="stale">Connecting</span>
+        <button id="preview-refresh" type="button">Refresh</button>
+      </div>
     </header>
     <main id="preview-root">${bodyHtml}</main>
     <script>
       (() => {
         const root = document.getElementById("preview-root");
+        const status = document.getElementById("preview-status");
+        const refresh = document.getElementById("preview-refresh");
         const source = new EventSource("/events");
+        const setStatus = (label, state) => {
+          if (!status) return;
+          status.textContent = label;
+          status.dataset.state = state;
+        };
+        setStatus("Connecting", "stale");
+        if (refresh) {
+          refresh.addEventListener("click", async () => {
+            setStatus("Refreshing", "stale");
+            await fetch("/message", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "full", html: root?.innerHTML ?? "" }),
+            }).catch(() => {});
+          });
+        }
+        source.addEventListener("open", () => setStatus("Live", "live"));
         source.addEventListener("update", (event) => {
           const payload = JSON.parse(event.data);
           if (typeof payload.html === "string") {
             root.innerHTML = payload.html;
           }
+          setStatus("Live", "live");
           if (payload.scrollTo) {
             const target = document.querySelector(payload.scrollTo);
             if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
           }
         });
+        source.addEventListener("error", () => setStatus("Reconnecting", "offline"));
       })();
     </script>
   </body>
@@ -342,6 +378,7 @@ export async function startPreviewSession({
   render,
   port = 0,
   debounceMs = 75,
+  autoOpen = true,
 }) {
   const server = await startPreviewServer({ port, initialHtml: buildPreviewHtml() });
   let timer = null;
@@ -361,6 +398,10 @@ export async function startPreviewSession({
     startedAt: new Date().toISOString(),
   });
 
+  if (autoOpen) {
+    openUrlInBrowser(server.url);
+  }
+
   const watcher = fs.watch(filePath, { persistent: false }, () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
@@ -378,6 +419,25 @@ export async function startPreviewSession({
       await server.close();
     },
   };
+}
+
+function openUrlInBrowser(url) {
+  const platform = process.platform;
+  const command = platform === "darwin"
+    ? ["open", url]
+    : platform === "win32"
+      ? ["cmd", "/c", "start", "", url]
+      : ["xdg-open", url];
+
+  try {
+    const child = spawn(command[0], command.slice(1), {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } catch {
+    // Best-effort browser launch only.
+  }
 }
 
 /**

@@ -222,11 +222,13 @@ export async function executeCommand(argv: string[]): Promise<CommandResult> {
     if (!filePath) throw new UsageError("watch requires <file>.");
     const portIndex = rest.indexOf("--port");
     const port = portIndex >= 0 ? Number(rest[portIndex + 1]) : 0;
+    const autoOpen = !rest.includes("--no-open");
     // @ts-expect-error workspace JS runtime module
     const preview = await import("../../preview/src/index.js");
     const session = await preview.startPreviewSession({
       filePath,
       port,
+      autoOpen,
       render: async () => renderDocumentHtml(await loadDocument(filePath)),
     });
     const waitUntilClose = new Promise<void>((resolve) => {

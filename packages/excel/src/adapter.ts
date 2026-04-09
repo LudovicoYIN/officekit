@@ -124,6 +124,8 @@ export interface ExcelChartModel {
   styleId?: number;
   plotAreaFill?: string;
   chartAreaFill?: string;
+  seriesLineWidth?: number;
+  seriesDash?: string;
 }
 
 export interface ExcelPivotTableModel {
@@ -2817,6 +2819,16 @@ function setChart(
       const colors = props.colors.split(",").map((value) => value.trim()).filter(Boolean);
       xml = setSeriesColors(xml, colors);
     }
+    if (
+      props.seriesLineWidth !== undefined || props.serieslinewidth !== undefined || props.linewidth !== undefined ||
+      props.seriesDash !== undefined || props.seriesdash !== undefined || props.linedash !== undefined
+    ) {
+      xml = setSeriesLineStyle(
+        xml,
+        props.seriesLineWidth ?? props.serieslinewidth ?? props.linewidth,
+        props.seriesDash ?? props.seriesdash ?? props.linedash,
+      );
+    }
   }
   state.zip.set(xmlPath, Buffer.from(xml, "utf8"));
   return seriesIndex !== undefined
@@ -2962,6 +2974,48 @@ function setSeriesColors(xml: string, colors: string[]) {
       : series[0].replace(/<c:tx>[\s\S]*?<\/c:tx>/, `$&${shapeProps}`);
     nextXml = nextXml.replace(series[0], nextSeries);
   }
+  return nextXml;
+}
+
+function setSeriesLineStyle(xml: string, width: string | undefined, dash: string | undefined) {
+  const seriesMatches = [...xml.matchAll(/<c:ser\b[\s\S]*?<\/c:ser>/g)];
+  if (seriesMatches.length === 0) {
+    return xml;
+  }
+
+  let nextXml = xml;
+  const emuWidth = width !== undefined ? Math.max(0, Math.round(Number(width) * 12700)) : undefined;
+  for (const series of seriesMatches) {
+    let nextSeries = series[0];
+    const existingSpPr = /<c:spPr\b[\s\S]*?<\/c:spPr>/.exec(nextSeries)?.[0];
+    let nextSpPr = existingSpPr ?? "<c:spPr></c:spPr>";
+    if (/<a:ln\b/.test(nextSpPr)) {
+      if (emuWidth !== undefined) {
+        if (/\bw="[^"]+"/.test(nextSpPr)) {
+          nextSpPr = nextSpPr.replace(/<a:ln\b([^>]*)\bw="[^"]+"([^>]*)>/, `<a:ln$1w="${emuWidth}"$2>`);
+        } else {
+          nextSpPr = nextSpPr.replace(/<a:ln\b([^>]*)>/, `<a:ln$1 w="${emuWidth}">`);
+        }
+      }
+      if (dash !== undefined) {
+        if (/<a:prstDash\b[^>]*val="[^"]+"\/>/.test(nextSpPr)) {
+          nextSpPr = nextSpPr.replace(/<a:prstDash\b[^>]*val="[^"]+"\/>/, `<a:prstDash val="${escapeXml(dash)}"/>`);
+        } else {
+          nextSpPr = nextSpPr.replace(/<\/a:ln>/, `<a:prstDash val="${escapeXml(dash)}"/></a:ln>`);
+        }
+      }
+    } else if (emuWidth !== undefined || dash !== undefined) {
+      const widthAttr = emuWidth !== undefined ? ` w="${emuWidth}"` : "";
+      const dashXml = dash !== undefined ? `<a:prstDash val="${escapeXml(dash)}"/>` : "";
+      nextSpPr = nextSpPr.replace(/<\/c:spPr>/, `<a:ln${widthAttr}>${dashXml}</a:ln></c:spPr>`);
+    }
+
+    nextSeries = existingSpPr
+      ? nextSeries.replace(existingSpPr, nextSpPr)
+      : nextSeries.replace(/<\/c:ser>/, `${nextSpPr}</c:ser>`);
+    nextXml = nextXml.replace(series[0], nextSeries);
+  }
+
   return nextXml;
 }
 
@@ -3475,6 +3529,8 @@ function getSheetCharts(state: ExcelWorkbookState, sheet: ExcelSheetModel) {
     const minorUnit = /<c:minorUnit\b[^>]*val="([^"]+)"/.exec(chartXml)?.[1];
     const axisNumberFormat = /<c:numFmt\b[^>]*formatCode="([^"]+)"/.exec(chartXml)?.[1];
     const styleId = /<c:style\b[^>]*val="([^"]+)"/.exec(chartXml)?.[1];
+    const seriesLineWidth = /<a:ln\b[^>]*w="([^"]+)"/.exec(chartXml)?.[1];
+    const seriesDash = /<a:prstDash\b[^>]*val="([^"]+)"/.exec(chartXml)?.[1];
     const plotAreaXml = /<c:plotArea\b[\s\S]*?<\/c:plotArea>/.exec(chartXml)?.[0] ?? "";
     const chartSpacePrefix = /<c:chartSpace\b[\s\S]*?<c:chart\b/.exec(chartXml)?.[0] ?? "";
     const plotAreaFill = /<c:spPr\b[\s\S]*?<a:solidFill>\s*<a:srgbClr val="([^"]+)"/.exec(plotAreaXml)?.[1];
@@ -3497,6 +3553,8 @@ function getSheetCharts(state: ExcelWorkbookState, sheet: ExcelSheetModel) {
       ...(styleId !== undefined ? { styleId: Number(styleId) } : {}),
       ...(plotAreaFill ? { plotAreaFill } : {}),
       ...(chartAreaFill ? { chartAreaFill } : {}),
+      ...(seriesLineWidth !== undefined ? { seriesLineWidth: Number(seriesLineWidth) / 12700 } : {}),
+      ...(seriesDash ? { seriesDash } : {}),
     };
   });
 }
@@ -4188,12 +4246,13 @@ function evaluateFormulaExpression(
     OFFSET: () => undefined,
     RATE: () => undefined,
     IRR: () => undefined,
+    CONVERT: (args) => evaluateConvertFormula(state, args, sheet, visited),
   };
 
   let replaced = true;
   while (replaced) {
     replaced = false;
-    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|XNOR|XOR|MEDIAN|MODE|LARGE|SMALL|GEOMEAN|HARMEAN|PERCENTRANK|PERCENTRANK_INC|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISERR|ISEVEN|ISODD|ISLOGICAL|ISNONTEXT|TYPE|NA|ERROR_TYPE|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|SLN|SYD|DB|DDB|STDEV|STDEVP|VAR|VARP|STDEV_S|STDEV_P|VAR_S|VAR_P|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ACOSH|ATAN|ATAN2|ASINH|ATANH|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND|CEILING|FLOOR|CEILING_MATH|FLOOR_MATH|DECIMAL|MODE_SNGL|RANK_EQ|PERCENTILE_INC|BIN2DEC|HEX2DEC|OCT2DEC|SWITCH|ROMAN|ARABIC|INDIRECT|OFFSET|RATE|IRR)\(([^()]*)\)/gi, (match, fn, args) => {
+    expression = expression.replace(/\b(SUM|AVERAGE|MIN|MAX|COUNT|COUNTA|SUMPRODUCT|IF|AND|OR|NOT|XNOR|XOR|MEDIAN|MODE|LARGE|SMALL|GEOMEAN|HARMEAN|PERCENTRANK|PERCENTRANK_INC|ISBLANK|ISNUMBER|ISTEXT|ISERROR|ISNA|ISERR|ISEVEN|ISODD|ISLOGICAL|ISNONTEXT|TYPE|NA|ERROR_TYPE|ABS|INT|TRUNC|SIGN|ROUND|ROUNDUP|ROUNDDOWN|MOD|POWER|SQRT|PI|RAND|RANDBETWEEN|LOG|LOG10|LN|EXP|PMT|FV|PV|NPER|NPV|IPMT|PPMT|SLN|SYD|DB|DDB|STDEV|STDEVP|VAR|VARP|STDEV_S|STDEV_P|VAR_S|VAR_P|RANK|PERCENTILE|PRODUCT|QUOTIENT|COUNTBLANK|ROW|COLUMN|ROWS|COLUMNS|IFS|CHOOSE|SIN|COS|TAN|ASIN|ACOS|ACOSH|ATAN|ATAN2|ASINH|ATANH|SINH|COSH|TANH|DEGREES|RADIANS|FACT|COMBIN|PERMUT|GCD|LCM|EVEN|ODD|MROUND|CEILING|FLOOR|CEILING_MATH|FLOOR_MATH|DECIMAL|MODE_SNGL|RANK_EQ|PERCENTILE_INC|BIN2DEC|HEX2DEC|OCT2DEC|SWITCH|ROMAN|ARABIC|INDIRECT|OFFSET|RATE|IRR|CONVERT)\(([^()]*)\)/gi, (match, fn, args) => {
       const result = functionEvaluators[fn.toUpperCase()]?.(args);
       if (result === undefined) {
         return match;
@@ -5510,6 +5569,87 @@ function evaluateDateFormulaForDisplay(state: ExcelWorkbookState | undefined, fo
     case "SECOND": return String(date.getSeconds());
     case "WEEKDAY": return String(date.getDay() + 1);
   }
+  return undefined;
+}
+
+function evaluateConvertFormula(
+  state: ExcelWorkbookState | undefined,
+  args: string,
+  sheet: ExcelSheetModel,
+  visited: Set<string>,
+) {
+  const parts = splitFormulaArgs(args);
+  const value = firstNumericFormulaArg(state, parts[0] ?? "0", sheet, visited);
+  const fromUnit = (evaluateTextFormulaArg(state, parts[1] ?? "", sheet) ?? "").trim().toLowerCase();
+  const toUnit = (evaluateTextFormulaArg(state, parts[2] ?? "", sheet) ?? "").trim().toLowerCase();
+  if (value === undefined || !fromUnit || !toUnit) return undefined;
+
+  const linearConversions: Record<string, number> = {
+    m: 1,
+    meter: 1,
+    meters: 1,
+    km: 1000,
+    mi: 1609.344,
+    mile: 1609.344,
+    miles: 1609.344,
+    ft: 0.3048,
+    foot: 0.3048,
+    feet: 0.3048,
+    in: 0.0254,
+    inch: 0.0254,
+    cm: 0.01,
+    mm: 0.001,
+    kg: 1,
+    kilogram: 1,
+    g: 0.001,
+    gram: 0.001,
+    lbm: 0.45359237,
+    lb: 0.45359237,
+    pound: 0.45359237,
+  };
+
+  const toKelvin = (unit: string, input: number) => {
+    switch (unit) {
+      case "c":
+      case "celsius":
+        return input + 273.15;
+      case "f":
+      case "fahrenheit":
+        return (input - 32) * 5 / 9 + 273.15;
+      case "k":
+      case "kelvin":
+        return input;
+      default:
+        return undefined;
+    }
+  };
+
+  const fromKelvin = (unit: string, kelvin: number) => {
+    switch (unit) {
+      case "c":
+      case "celsius":
+        return kelvin - 273.15;
+      case "f":
+      case "fahrenheit":
+        return (kelvin - 273.15) * 9 / 5 + 32;
+      case "k":
+      case "kelvin":
+        return kelvin;
+      default:
+        return undefined;
+    }
+  };
+
+  if (fromUnit in linearConversions && toUnit in linearConversions) {
+    const baseValue = value * linearConversions[fromUnit];
+    return baseValue / linearConversions[toUnit];
+  }
+
+  const kelvin = toKelvin(fromUnit, value);
+  if (kelvin !== undefined) {
+    return fromKelvin(toUnit, kelvin);
+  }
+
   return undefined;
 }
 
