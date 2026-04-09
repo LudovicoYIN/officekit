@@ -457,6 +457,40 @@ export const pptTools: McpTool[] = [
     description: "Checks if text overflows in a specific shape and returns details about the overflow.",
     inputSchema: shapePathSchema,
   },
+  {
+    name: "Check",
+    description: "Scans the entire presentation for layout issues (text overflow, missing titles, empty slides). Returns a comprehensive report.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Path to the PPTX file",
+        },
+        slideIndex: {
+          type: "number",
+          description: "Optional 1-based slide index to check specific slide only",
+        },
+        checkTextOverflow: {
+          type: "boolean",
+          description: "Whether to check text overflow issues (default: true)",
+        },
+        checkMissingTitles: {
+          type: "boolean",
+          description: "Whether to check for missing titles (default: true)",
+        },
+        checkEmptySlides: {
+          type: "boolean",
+          description: "Whether to check for empty slides (default: true)",
+        },
+        minSeverity: {
+          type: "string",
+          description: "Minimum severity to report: 'info', 'warning', or 'error' (default: 'info')",
+        },
+      },
+      required: ["filePath"],
+    },
+  },
 ];
 
 /**

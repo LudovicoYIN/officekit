@@ -1,39 +1,29 @@
 # @officekit/ppt
 
-Lane-3 parity-first scaffold for the PowerPoint adapter.
+PowerPoint document adapter for officekit.
 
-## Current contents
+## Features
 
-- `src/manifest.js` — source lineage, capability families, deferred shared-core contracts, implementation milestones, and parity risks
-- `src/index.js` — package exports for manifest/contract helpers
-- `test/manifest.test.js` — Bun-backed invariants for slide/preview/overflow parity expectations
+- Slide creation and manipulation
+- Shape operations (alignment, distribution)
+- Animations and morph transitions
+- Master views and layouts
+- Theme management
+- Text overflow checking
+- Table, chart, and media support
+- HTML/SVG preview
 
-## Source lineage
+## Usage
 
-Primary source families:
+```typescript
+import { createPresentation, getSlide, addSlide } from "@officekit/ppt";
 
-- `OfficeCLI/src/officecli/Handlers/PowerPointHandler.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Add*.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Query.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Set*.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.View.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.ShapeProperties.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.SvgPreview.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.HtmlPreview*.cs`
-- `OfficeCLI/src/officecli/Handlers/Pptx/PowerPointHandler.Theme.cs`
+// Create presentation
+await createPresentation("output.pptx");
 
-## Parity-critical families
+// Add slide
+await addSlide("presentation.pptx");
 
-- slide/layout/placeholder semantics
-- shapes, tables, text, media, hyperlinks
-- charts and theme inheritance
-- HTML and SVG preview
-- overflow checks
-- mutation flows and raw XML
-
-## Deferred shared-core decisions
-
-- selector/path grammar
-- shared result envelope
-- shared preview server
-- cross-format query helpers
+// Get slide content
+const slide = await getSlide("presentation.pptx", 1);
+```

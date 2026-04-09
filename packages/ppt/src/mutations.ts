@@ -26,7 +26,7 @@ import { parsePath, buildPath, getSlideIndex } from "./path.js";
  */
 export interface BatchOperation {
   /** Operation type */
-  op: "set" | "remove" | "swap" | "copyFrom" | "rawSet";
+  op: "set" | "remove" | "swap" | "copyFrom" | "rawSet" | "setShapeText";
   /** Operation parameters */
   params: Record<string, unknown>;
 }
@@ -163,40 +163,39 @@ function escapeXml(text: string): string {
 /**
  * Resolves a slide path or index to a 1-based slide index.
  */
-function resolveSlideIndex(filePath: string, slideRef: number | string): Promise<Result<number>> {
-  return andThen(readFile(filePath, null), async (buffer) => {
-    try {
-      const zip = readStoredZip(buffer);
-      const presentationXml = requireEntry(zip, "ppt/presentation.xml");
-      const relsXml = requireEntry(zip, "ppt/_rels/presentation.xml.rels");
-      const relationships = parseRelationshipEntries(relsXml);
-      const slideIds = getSlideIds(presentationXml);
+async function resolveSlideIndex(filePath: string, slideRef: number | string): Promise<Result<number>> {
+  try {
+    const buffer = await readFile(filePath);
+    const zip = readStoredZip(buffer);
+    const presentationXml = requireEntry(zip, "ppt/presentation.xml");
+    const relsXml = requireEntry(zip, "ppt/_rels/presentation.xml.rels");
+    const relationships = parseRelationshipEntries(relsXml);
+    const slideIds = getSlideIds(presentationXml);
 
-      if (typeof slideRef === "number") {
-        if (slideRef < 1 || slideRef > slideIds.length) {
-          return invalidInput(`Slide index ${slideRef} is out of range (1-${slideIds.length})`);
-        }
-        return ok(slideRef);
+    if (typeof slideRef === "number") {
+      if (slideRef < 1 || slideRef > slideIds.length) {
+        return invalidInput(`Slide index ${slideRef} is out of range (1-${slideIds.length})`);
       }
-
-      // slideRef is a path like "/slide[1]"
-      const slideIndexMatch = slideRef.match(/^\/slide\[(\d+)\]/i);
-      if (slideIndexMatch) {
-        const index = parseInt(slideIndexMatch[1], 10);
-        if (index < 1 || index > slideIds.length) {
-          return invalidInput(`Slide index ${index} is out of range (1-${slideIds.length})`);
-        }
-        return ok(index);
-      }
-
-      return invalidInput(`Invalid slide reference: ${slideRef}`);
-    } catch (e) {
-      if (e instanceof Error) {
-        return err("operation_failed", e.message);
-      }
-      return err("operation_failed", String(e));
+      return ok(slideRef);
     }
-  });
+
+    // slideRef is a path like "/slide[1]"
+    const slideIndexMatch = slideRef.match(/^\/slide\[(\d+)\]/i);
+    if (slideIndexMatch) {
+      const index = parseInt(slideIndexMatch[1], 10);
+      if (index < 1 || index > slideIds.length) {
+        return invalidInput(`Slide index ${index} is out of range (1-${slideIds.length})`);
+      }
+      return ok(index);
+    }
+
+    return invalidInput(`Invalid slide reference: ${slideRef}`);
+  } catch (e) {
+    if (e instanceof Error) {
+      return err("operation_failed", e.message);
+    }
+    return err("operation_failed", String(e));
+  }
 }
 
 /**
@@ -237,7 +236,7 @@ export async function rawSet(filePath: string, pptPath: string, xml: string): Pr
   try {
     const parsed = parsePath(pptPath);
     if (!parsed.ok) {
-      return parsed;
+      return err(parsed.error?.code ?? "invalid_path", parsed.error?.message ?? "Failed to parse path");
     }
 
     const slideIndex = getSlideIndex(pptPath);
@@ -250,10 +249,13 @@ export async function rawSet(filePath: string, pptPath: string, xml: string): Pr
 
     const slidePathResult = getSlideEntryPath(zip, slideIndex);
     if (!slidePathResult.ok) {
-      return slidePathResult;
+      return err(slidePathResult.error?.code ?? "slide_not_found", slidePathResult.error?.message ?? "Failed to get slide path");
     }
 
     const slideEntry = slidePathResult.data;
+    if (!slideEntry) {
+      return err("slide_not_found", "Slide entry not found");
+    }
     const slideXml = requireEntry(zip, slideEntry);
     const updatedSlideXml = rawSetElementInSlide(slideXml, pptPath, xml);
 
@@ -349,7 +351,7 @@ export async function rawGet(filePath: string, pptPath: string): Promise<Result<
   try {
     const parsed = parsePath(pptPath);
     if (!parsed.ok) {
-      return parsed;
+      return err(parsed.error?.code ?? "invalid_path", parsed.error?.message ?? "Failed to parse path");
     }
 
     const slideIndex = getSlideIndex(pptPath);
@@ -362,10 +364,13 @@ export async function rawGet(filePath: string, pptPath: string): Promise<Result<
 
     const slidePathResult = getSlideEntryPath(zip, slideIndex);
     if (!slidePathResult.ok) {
-      return slidePathResult;
+      return err(slidePathResult.error?.code ?? "slide_not_found", slidePathResult.error?.message ?? "Failed to get slide path");
     }
 
     const slideEntry = slidePathResult.data;
+    if (!slideEntry) {
+      return err("slide_not_found", "Slide entry not found");
+    }
     const slideXml = requireEntry(zip, slideEntry);
 
     // Extract element XML
@@ -520,10 +525,13 @@ export async function swapShapes(filePath: string, path1: string, path2: string)
 
     const slidePathResult = getSlideEntryPath(zip, slideIndex1);
     if (!slidePathResult.ok) {
-      return slidePathResult;
+      return err(slidePathResult.error?.code ?? "slide_not_found", slidePathResult.error?.message ?? "Failed to get slide path");
     }
 
     const slideEntry = slidePathResult.data;
+    if (!slideEntry) {
+      return err("slide_not_found", "Slide entry not found");
+    }
     const slideXml = requireEntry(zip, slideEntry);
 
     // Extract shape indices
@@ -628,19 +636,25 @@ export async function copyShape(
     // Get source slide
     const sourceSlidePathResult = getSlideEntryPath(zip, sourceSlideIndex);
     if (!sourceSlidePathResult.ok) {
-      return sourceSlidePathResult;
+      return err(sourceSlidePathResult.error?.code ?? "slide_not_found", sourceSlidePathResult.error?.message ?? "Failed to get source slide path");
     }
 
     const sourceSlideEntry = sourceSlidePathResult.data;
+    if (!sourceSlideEntry) {
+      return err("slide_not_found", "Source slide entry not found");
+    }
     const sourceSlideXml = requireEntry(zip, sourceSlideEntry);
 
     // Get target slide
     const targetSlidePathResult = getSlideEntryPath(zip, targetSlideIndex);
     if (!targetSlidePathResult.ok) {
-      return targetSlidePathResult;
+      return err(targetSlidePathResult.error?.code ?? "slide_not_found", targetSlidePathResult.error?.message ?? "Failed to get target slide path");
     }
 
     const targetSlideEntry = targetSlidePathResult.data;
+    if (!targetSlideEntry) {
+      return err("slide_not_found", "Target slide entry not found");
+    }
     const targetSlideXml = requireEntry(zip, targetSlideEntry);
 
     // Extract source shape XML
@@ -911,12 +925,17 @@ export async function batch(filePath: string, operations: BatchOperation[]): Pro
 
           const slidePathResult = getSlideEntryPathFromZip(zip, slideIndex);
           if (!slidePathResult.ok) {
-            return slidePathResult;
+            return err(slidePathResult.error?.code ?? "slide_not_found", slidePathResult.error?.message ?? "Failed to get slide path");
           }
 
-          let slideXml = modifiedEntries.get(slidePathResult.data) || requireEntry(zip, slidePathResult.data);
+          const slideEntry = slidePathResult.data;
+          if (!slideEntry) {
+            return err("slide_not_found", "Slide entry not found");
+          }
+
+          let slideXml = modifiedEntries.get(slideEntry) || requireEntry(zip, slideEntry);
           slideXml = rawSetElementInSlide(slideXml, path, xml);
-          modifiedEntries.set(slidePathResult.data, slideXml);
+          modifiedEntries.set(slideEntry, slideXml);
           break;
         }
 
@@ -963,4 +982,107 @@ function getSlideEntryPathFromZip(zip: Map<string, Buffer>, slideIndex: number):
   const slidePath = normalizeZipPath("ppt", slideRel?.target ?? "");
 
   return ok(slidePath);
+}
+
+// ============================================================================
+// Validation - OpenXML Schema Validation
+// ============================================================================
+
+/**
+ * Validation error for PPTX documents.
+ */
+export interface PptValidationError {
+  errorType: string;
+  description: string;
+  part?: string;
+  path?: string;
+}
+
+/**
+ * Validates a PPTX document against OpenXML schema.
+ * Returns a list of validation errors.
+ */
+export async function validatePptDocument(filePath: string): Promise<PptValidationError[]> {
+  const errors: PptValidationError[] = [];
+  const buffer = await readFile(filePath);
+  const zip = readStoredZip(buffer);
+
+  // Check required OpenXML parts exist
+  const requiredParts = ["[Content_Types].xml", "ppt/presentation.xml"];
+  for (const part of requiredParts) {
+    if (!zip.has(part)) {
+      errors.push({ errorType: "missing_part", description: `Required part missing: ${part}`, part });
+    }
+  }
+
+  // Validate presentation.xml structure
+  const presentationXml = zip.get("ppt/presentation.xml");
+  if (presentationXml) {
+    const content = presentationXml.toString("utf8");
+    if (!content.includes("<p:presentation") && !content.includes("<p:presentation ")) {
+      errors.push({ errorType: "invalid_root", description: "Presentation root element (p:presentation) not found", part: "ppt/presentation.xml" });
+    }
+    if (!content.includes("xmlns:p=") && !content.includes("xmlns:p=\"")) {
+      errors.push({ errorType: "missing_namespace", description: "Missing p: namespace declaration", part: "ppt/presentation.xml" });
+    }
+  }
+
+  // Validate slides exist
+  const slideIds = getSlideIds(zip.get("ppt/presentation.xml")?.toString("utf8") ?? "");
+  if (slideIds.length === 0) {
+    errors.push({ errorType: "no_slides", description: "Presentation has no slides", part: "ppt/presentation.xml" });
+  }
+
+  // Validate slide entries exist for each slide ID
+  const relsXml = zip.get("ppt/_rels/presentation.xml.rels")?.toString("utf8");
+  if (relsXml) {
+    const relationships = parseRelationshipEntries(relsXml);
+    for (const slide of slideIds) {
+      const slideRel = relationships.find(r => r.id === slide.relId);
+      if (slideRel) {
+        const slidePath = normalizeZipPath("ppt", slideRel.target);
+        if (!zip.has(slidePath)) {
+          errors.push({ errorType: "missing_slide", description: `Slide file not found: ${slidePath}`, part: slidePath });
+        }
+      }
+    }
+
+    // Check for duplicate relationship IDs
+    const ids = relationships.map(r => r.id);
+    const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+    if (duplicates.length > 0) {
+      errors.push({ errorType: "duplicate_rels", description: `Duplicate relationship IDs: ${[...new Set(duplicates)].join(", ")}`, part: "ppt/_rels/presentation.xml.rels" });
+    }
+  }
+
+  // Validate Content_Types.xml
+  const contentTypesXml = zip.get("[Content_Types].xml");
+  if (contentTypesXml) {
+    const content = contentTypesXml.toString("utf8");
+    if (!content.includes("[Content_Types]")) {
+      errors.push({ errorType: "invalid_content_types", description: "Content_Types.xml root element not found", part: "[Content_Types].xml" });
+    }
+  }
+
+  // Validate slide layouts if present
+  for (const [name] of zip.entries()) {
+    if (name.startsWith("ppt/slideLayouts/") && name.endsWith(".xml")) {
+      const layoutXml = zip.get(name)?.toString("utf8") ?? "";
+      if (!layoutXml.includes("<p:sldLayout") && !layoutXml.includes("<p:sldLayout ")) {
+        errors.push({ errorType: "invalid_slide_layout", description: `Slide layout root element not found in ${name}`, part: name });
+      }
+    }
+  }
+
+  // Validate slide masters if present
+  for (const [name] of zip.entries()) {
+    if (name.startsWith("ppt/slideMasters/") && name.endsWith(".xml")) {
+      const masterXml = zip.get(name)?.toString("utf8") ?? "";
+      if (!masterXml.includes("<p:sldMaster") && !masterXml.includes("<p:sldMaster ")) {
+        errors.push({ errorType: "invalid_slide_master", description: `Slide master root element not found in ${name}`, part: name });
+      }
+    }
+  }
+
+  return errors;
 }

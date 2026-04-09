@@ -29,10 +29,13 @@ export * from "./slides.js";
 // Layout operations
 export * from "./layouts.js";
 
+// Master view and layout operations (getMasters, getMaster, getMasterLayouts, setMasterProperty, setSlideLayoutByIndex)
+export * from "./master-view.js";
+
 // Notes management
 export * from "./notes.js";
 
-// Core mutations (Set, Remove, Swap, CopyFrom, Raw, Batch)
+// Core mutations (Set, Remove, Swap, CopyFrom, Raw, Batch, Validate)
 export * from "./mutations.js";
 
 // Shape mutations
@@ -84,7 +87,10 @@ export * from "./preview-svg.js";
 // Overflow checking operations (checkShapeTextOverflow, checkSlideOverflow, getOverflowIssues)
 export * from "./overflow.js";
 
-// Animation operations (getAnimations, setAnimation, removeAnimation)
+// Layout checking operations (checkPresentation, checkSlide, checkShape, formatCheckReport)
+export * from "./check.js";
+
+// Animation operations (getAnimations, setAnimation, removeAnimation, detectMorphNodes, applyMorphTransition, removeMorphTransition, getMorphTransition, hasMorphTransition)
 export * from "./animations.js";
 
 // Watch operations (watch - live preview with auto-refresh)

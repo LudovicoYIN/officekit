@@ -14,7 +14,10 @@
     "baseUrl": ".",
     "paths": {
       "@officekit/core": ["packages/core/src/index.ts"],
-      "@officekit/cli": ["packages/cli/src/index.ts"]
+      "@officekit/cli": ["packages/cli/src/index.ts"],
+      "@officekit/ppt": ["packages/ppt/src/index.js"],
+      "@officekit/word": ["packages/word/src/index.js"],
+      "@officekit/excel": ["packages/excel/src/index.js"]
     }
   },
   "include": [

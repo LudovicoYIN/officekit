@@ -87,7 +87,7 @@ export function createFormatParityStatusReport() {
     return {
       format: definition.format,
       packageName: manifest.packageName,
-      status: "scaffolded",
+      status: "implemented",
       fixtureCount: fixtures.length,
       fixtureIds: fixtures.map((fixture) => fixture.id),
       copiedFixtureCount: fixtures.filter((fixture) => fixture.mode === "copied").length,

@@ -1,3 +1,4 @@
+import { createConnection } from "node:net";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { OfficekitError, UsageError } from "./errors.js";
@@ -5,17 +6,48 @@ import { assertFormat, type SupportedFormat } from "./formats.js";
 import { createStoredZip, readStoredZip } from "./zip.js";
 import {
   addExcelNode,
+  addExcelPart,
   createExcelDocument,
   getExcelNode,
   importExcelDelimitedData,
   queryExcelNodes as queryExcelNodesFromAdapter,
   rawExcelDocument,
+  rawSetExcelNode,
   removeExcelNode,
   renderExcelHtmlFromRoot,
   setExcelNode,
   summarizeExcelCheck,
+  validateExcelDocument,
   viewExcelDocument,
 } from "../../excel/src/adapter.js";
+import {
+  getWordNode,
+  addWordNode,
+  addWordPart,
+  setWordNode,
+  removeWordNode,
+  queryWordNodes,
+  viewWordDocument,
+  rawWordDocument,
+  validateWordDocument,
+  batchWordNodes,
+  moveWordNode,
+  swapWordNodes,
+  copyWordNode,
+  setWordStyle,
+  setWordSection,
+  rawSetWordDocument,
+  importWordDelimitedData,
+} from "../../word/src/adapter.js";
+import { getSlides, addSlide, removeSlide, moveSlide } from "../../ppt/src/slides.js";
+import { getSlide } from "../../ppt/src/query.js";
+import { swapSlides, swapShapes, rawSet as rawSetPpt, rawGet as rawGetPpt, validatePptDocument } from "../../ppt/src/mutations.js";
+import { addShape, removeShape, setShapeText } from "../../ppt/src/shapes.js";
+import { addChart as addPptChart } from "../../ppt/src/charts.js";
+import { viewAsText, viewAsAnnotated, viewAsOutline, viewAsStats, viewAsIssues } from "../../ppt/src/views.js";
+import { viewAsHtml } from "../../ppt/src/preview-html.js";
+import { viewAsSvg } from "../../ppt/src/preview-svg.js";
+import { merge as mergePpt, type MergeData, type MergedResult } from "../../ppt/src/merge.js";
 import type {
   ExcelCellModel as ExcelCell,
   ExcelWorkbookModel,
@@ -23,6 +55,7 @@ import type {
   ExcelSheetModel as ExcelSheet,
   ExcelWorkbookSettings,
 } from "../../excel/src/model.js";
+import { readSessionRecord } from "./session-registry.js";
 
 export interface WordParagraph {
   text: string;
@@ -115,49 +148,68 @@ export async function createDocument(filePath: string) {
 }
 
 export async function addDocumentNode(filePath: string, targetPath: string, options: CommandOptions) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return addExcelNode(filePath, targetPath, options);
   }
-  const document = await loadDocument(filePath);
-  switch (document.format) {
-    case "word": {
-      if (targetPath !== "/body") {
-        throw new UsageError("Word add currently supports only /body.", "Use /body with --type paragraph or --type table.");
-      }
-      if (options.type === "paragraph") {
-        document.word!.body.push(createWordParagraph(options.props.text ?? ""));
-        break;
-      }
-      if (options.type === "table") {
-        const rows = Math.max(1, Number(options.props.rows ?? "2"));
-        const cols = Math.max(1, Number(options.props.cols ?? "2"));
-        document.word!.body.push(createWordTable(rows, cols));
-        break;
-      }
-      throw new UsageError(
-        "Word add currently supports: add <file.docx> /body --type paragraph|table ...",
-        "Use /body with --type paragraph or --type table.",
-      );
-    }
-    case "excel":
-      throw new UsageError("Excel operations are handled by the Excel adapter.");
-    case "powerpoint": {
-      if (targetPath === "/" && options.type === "slide") {
-        document.powerpoint!.slides.push({ title: options.props.title ?? "Untitled slide", shapes: [] });
-        break;
-      }
-      const slide = resolveSlide(document, targetPath);
-      if (options.type !== "shape") {
-        throw new UsageError("PowerPoint add currently supports slide creation at / and shape insertion under /slide[n].", "Use / with --type slide or /slide[n] with --type shape.");
-      }
-      slide.shapes.push({ text: options.props.text ?? options.props.title ?? "" });
-      break;
-    }
+  if (format === "word") {
+    return addWordNode(filePath, targetPath, options);
   }
-
-  stampDocument(document);
-  await persistDocument(filePath, document);
-  return materializePath(document, targetPath);
+  if (format === "powerpoint") {
+    // PowerPoint: add slide at root
+    if (targetPath === "/" && options.type === "slide") {
+      const result = await addSlide(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to add slide", "operation_failed");
+      }
+      if (options.props.title || options.props.text) {
+        const slidePath = result.data?.path ?? "/slide[1]";
+        const slideIndex = Number(/^\/slide\[(\d+)\]$/.exec(slidePath)?.[1] ?? "1");
+        const titleShape = await addShape(
+          filePath,
+          slideIndex,
+          "rectangle",
+          { x: 685800, y: 457200 },
+          { width: 10972800, height: 914400 },
+        );
+        if (!titleShape.ok) {
+          throw new OfficekitError(titleShape.error?.message ?? "Failed to add title shape", "operation_failed");
+        }
+        const titleResult = await setShapeText(
+          filePath,
+          titleShape.data?.path ?? `/slide[${slideIndex}]/shape[1]`,
+          options.props.title ?? options.props.text ?? "",
+        );
+        if (!titleResult.ok) {
+          throw new OfficekitError(titleResult.error?.message ?? "Failed to set slide title", "operation_failed");
+        }
+      }
+      return { ok: true, path: result.data?.path ?? "/slide[new]" };
+    }
+    const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
+    if (slideMatch && options.type === "shape") {
+      const slideIndex = Number(slideMatch[1]);
+      const addResult = await addShape(
+        filePath,
+        slideIndex,
+        "rectangle",
+        { x: 914400, y: 1600200 },
+        { width: 10058400, height: 685800 },
+      );
+      if (!addResult.ok) {
+        throw new OfficekitError(addResult.error?.message ?? "Failed to add shape", "operation_failed");
+      }
+      if (options.props.text) {
+        const textResult = await setShapeText(filePath, addResult.data?.path ?? `/slide[${slideIndex}]/shape[1]`, options.props.text);
+        if (!textResult.ok) {
+          throw new OfficekitError(textResult.error?.message ?? "Failed to set shape text", "operation_failed");
+        }
+      }
+      return { ok: true, path: addResult.data?.path ?? `${targetPath}/shape[new]` };
+    }
+    throw new UsageError("PowerPoint add supports / with --type slide.");
+  }
+  throw new UsageError(`Unsupported format: ${format}`);
 }
 
 export async function importDelimitedData(
@@ -166,56 +218,50 @@ export async function importDelimitedData(
   content: string,
   options: ImportOptions,
 ) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return importExcelDelimitedData(filePath, parentPath, content, options);
   }
-  throw new UsageError("import currently supports only .xlsx files.");
+  if (format === "word") {
+    const result = await importWordDelimitedData(filePath, parentPath, content, {
+      delimiter: options.delimiter,
+      hasHeader: options.hasHeader,
+    });
+    if (!result.ok || !result.data) {
+      throw new OfficekitError(result.error?.message ?? "Import failed", result.error?.code ?? "import_failed");
+    }
+    return {
+      importedRows: result.data.importedRows,
+      importedCols: result.data.importedCols,
+      path: result.data.path,
+      hasHeader: result.data.hasHeader,
+    };
+  }
+  throw new UsageError("import currently supports .xlsx and .docx files.");
 }
 
 export async function setDocumentNode(filePath: string, targetPath: string, options: CommandOptions) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return setExcelNode(filePath, targetPath, options);
   }
+  if (format === "word") {
+    return setWordNode(filePath, targetPath, options);
+  }
   const document = await loadDocument(filePath);
-  if (document.format === "word") {
-    const match = /^\/body\/p\[(\d+)\]$/.exec(targetPath);
-    const tableMatch = /^\/body\/table\[(\d+)\]\/cell\[(\d+),(\d+)\]$/.exec(targetPath);
-    if (match) {
-      const paragraph = resolveWordParagraph(document, Number(match[1]));
-      if (!paragraph) throw new OfficekitError(`Paragraph ${match[1]} does not exist.`, "not_found");
-      paragraph.text = options.props.text ?? paragraph.text;
-    } else if (tableMatch) {
-      const table = resolveWordTable(document, Number(tableMatch[1]));
-      const row = table?.rows[Number(tableMatch[2]) - 1];
-      const cell = row?.cells[Number(tableMatch[3]) - 1];
-      if (!cell) {
-        throw new OfficekitError(
-          `Table cell ${tableMatch[2]},${tableMatch[3]} does not exist in table ${tableMatch[1]}.`,
-          "not_found",
-        );
-      }
-      cell.text = options.props.text ?? cell.text;
-    } else {
-      throw new UsageError(
-        "Word set currently supports /body/p[n] or /body/table[n]/cell[row,col].",
-        "Example: officekit set demo.docx /body/table[1]/cell[1,1] --prop text=Updated",
-      );
-    }
+  const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
+  const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
+  if (shapeMatch) {
+    const slide = document.powerpoint!.slides[Number(shapeMatch[1]) - 1];
+    const shape = slide?.shapes[Number(shapeMatch[2]) - 1];
+    if (!shape) throw new OfficekitError(`Shape ${shapeMatch[2]} does not exist.`, "not_found");
+    shape.text = options.props.text ?? shape.text;
+  } else if (slideMatch) {
+    const slide = document.powerpoint!.slides[Number(slideMatch[1]) - 1];
+    if (!slide) throw new OfficekitError(`Slide ${slideMatch[1]} does not exist.`, "not_found");
+    slide.title = options.props.title ?? options.props.text ?? slide.title;
   } else {
-    const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
-    const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
-    if (shapeMatch) {
-      const slide = document.powerpoint!.slides[Number(shapeMatch[1]) - 1];
-      const shape = slide?.shapes[Number(shapeMatch[2]) - 1];
-      if (!shape) throw new OfficekitError(`Shape ${shapeMatch[2]} does not exist.`, "not_found");
-      shape.text = options.props.text ?? shape.text;
-    } else if (slideMatch) {
-      const slide = document.powerpoint!.slides[Number(slideMatch[1]) - 1];
-      if (!slide) throw new OfficekitError(`Slide ${slideMatch[1]} does not exist.`, "not_found");
-      slide.title = options.props.title ?? options.props.text ?? slide.title;
-    } else {
-      throw new UsageError("PowerPoint set currently supports /slide[n] or /slide[n]/shape[n].");
-    }
+    throw new UsageError("PowerPoint set currently supports /slide[n] or /slide[n]/shape[n].");
   }
 
   stampDocument(document);
@@ -224,58 +270,609 @@ export async function setDocumentNode(filePath: string, targetPath: string, opti
 }
 
 export async function removeDocumentNode(filePath: string, targetPath: string) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return removeExcelNode(filePath, targetPath);
   }
-  const document = await loadDocument(filePath);
-  if (document.format === "word") {
-    const match = /^\/body\/p\[(\d+)\]$/.exec(targetPath);
-    const tableMatch = /^\/body\/table\[(\d+)\]$/.exec(targetPath);
-    if (match) {
-      removeWordBodyNode(document, "paragraph", Number(match[1]));
-    } else if (tableMatch) {
-      removeWordBodyNode(document, "table", Number(tableMatch[1]));
-    } else {
-      throw new UsageError("Word remove currently supports /body/p[n] or /body/table[n].");
-    }
-  } else if (document.format === "excel") {
-    throw new UsageError("Excel operations are handled by the Excel adapter.");
-  } else {
+  if (format === "word") {
+    return removeWordNode(filePath, targetPath);
+  }
+  if (format === "powerpoint") {
     const shapeMatch = /^\/slide\[(\d+)\]\/shape\[(\d+)\]$/.exec(targetPath);
     const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
     if (shapeMatch) {
-      const slide = document.powerpoint!.slides[Number(shapeMatch[1]) - 1];
-      slide?.shapes.splice(Number(shapeMatch[2]) - 1, 1);
-    } else if (slideMatch) {
-      document.powerpoint!.slides.splice(Number(slideMatch[1]) - 1, 1);
-    } else {
-      throw new UsageError("PowerPoint remove currently supports /slide[n] or /slide[n]/shape[n].");
+      const result = await removeShape(filePath, targetPath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to remove shape", "operation_failed");
+      }
+      return { ok: true, targetPath };
     }
+    if (slideMatch) {
+      const result = await removeSlide(filePath, Number(slideMatch[1]));
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to remove slide", "operation_failed");
+      }
+      return { ok: true, targetPath };
+    }
+    throw new UsageError("PowerPoint remove supports /slide[n] or /slide[n]/shape[n].");
   }
-  stampDocument(document);
-  await persistDocument(filePath, document);
-  return { ok: true, targetPath };
+  throw new UsageError(`Unsupported format: ${format}`);
+}
+
+export async function moveDocumentNode(
+  filePath: string,
+  sourcePath: string,
+  targetPath: string,
+  options?: { after?: string; before?: string; position?: string | number } | { index?: number }
+) {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
+    const { moveExcelNode } = await import("../../excel/src/adapter.js");
+    return moveExcelNode(filePath, sourcePath, targetPath, options as { index?: number });
+  }
+  if (format === "word") {
+    return moveWordNode(filePath, sourcePath, targetPath, options as { after?: string; before?: string; position?: string | number } ?? {});
+  }
+  if (format === "powerpoint") {
+    // Parse /slide[n] paths for moveSlide
+    const slideMatch = /^\/slide\[(\d+)\]$/.exec(sourcePath);
+    const targetSlideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
+    if (slideMatch && targetSlideMatch) {
+      const fromIndex = Number(slideMatch[1]);
+      const toIndex = Number(targetSlideMatch[1]);
+      const result = await moveSlide(filePath, fromIndex, toIndex);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to move slide", "operation_failed");
+      }
+      return { ok: true, sourcePath, targetPath };
+    }
+    throw new UsageError("PowerPoint move supports /slide[n] to /slide[m].");
+  }
+  throw new UsageError(`Move operation not supported for format: ${format}`);
+}
+
+export async function swapDocumentNodes(filePath: string, path1: string, path2: string) {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
+    const { swapExcelNodes } = await import("../../excel/src/adapter.js");
+    return swapExcelNodes(filePath, path1, path2);
+  }
+  if (format === "word") {
+    return swapWordNodes(filePath, path1, path2);
+  }
+  if (format === "powerpoint") {
+    // Check if swapping slides or shapes
+    const slideMatch1 = /^\/slide\[(\d+)\]$/.exec(path1);
+    const slideMatch2 = /^\/slide\[(\d+)\]$/.exec(path2);
+    if (slideMatch1 && slideMatch2) {
+      const result = await swapSlides(filePath, Number(slideMatch1[1]), Number(slideMatch2[1]));
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to swap slides", "operation_failed");
+      }
+      return { ok: true, path1, path2 };
+    }
+    // Try swapping shapes
+    const result = await swapShapes(filePath, path1, path2);
+    if (!result.ok) {
+      throw new OfficekitError(result.error?.message ?? "Failed to swap", "operation_failed");
+    }
+    return { ok: true, path1, path2 };
+  }
+  throw new UsageError(`Swap operation not supported for format: ${format}`);
+}
+
+export async function copyDocumentNode(
+  filePath: string,
+  sourcePath: string,
+  targetPath: string,
+  options?: { index?: number; after?: string; before?: string }
+) {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
+    const { copyFromExcelNode } = await import("../../excel/src/adapter.js");
+    return copyFromExcelNode(filePath, sourcePath, targetPath, options);
+  }
+  if (format === "word") {
+    return copyWordNode(filePath, sourcePath, targetPath, options ?? {});
+  }
+  throw new UsageError(`Copy operation not supported for format: ${format}`);
+}
+
+export interface AddPartResult {
+  relId: string;
+  partPath: string;
+}
+
+export async function addDocumentPart(
+  filePath: string,
+  parentPath: string,
+  partType: string,
+  options?: Record<string, string>
+): Promise<AddPartResult> {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
+    return addExcelPart(filePath, parentPath, partType, options);
+  }
+  if (format === "word") {
+    const result = await addWordPart(filePath, partType, options);
+    if (!result.ok) {
+      throw new OfficekitError(result.error?.message ?? "Failed to add part", "operation_failed");
+    }
+    return result.data!;
+  }
+  if (format === "powerpoint") {
+    const slideMatch = /^\/slide\[(\d+)\]$/.exec(parentPath);
+    if (!slideMatch) {
+      throw new UsageError("PowerPoint add-part currently supports /slide[n] as the parent path.");
+    }
+    if (partType.toLowerCase() !== "chart") {
+      throw new UsageError("PowerPoint add-part currently supports --type chart.");
+    }
+    const slideIndex = Number(slideMatch[1]);
+    const chartType = (options?.type as "bar" | "column" | "line" | "pie" | "scatter" | "area" | undefined) ?? "bar";
+    const categories = (options?.categories ?? "A,B,C").split(",").map((value) => value.trim()).filter(Boolean);
+    const values = (options?.values ?? "1,2,3")
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .filter((value) => !Number.isNaN(value));
+    const seriesName = options?.seriesName ?? options?.name ?? "Series 1";
+    const result = await addPptChart(
+      filePath,
+      slideIndex,
+      chartType,
+      {},
+      {
+        title: options?.title ?? "Chart",
+        categories,
+        series: [{ name: seriesName, values: values.length > 0 ? values : [1, 2, 3] }],
+      },
+    );
+    if (!result.ok || !result.data) {
+      throw new OfficekitError(result.error?.message ?? "Failed to add chart part", result.error?.code ?? "operation_failed");
+    }
+    const chartPathMatch = /\/chart\[(\d+)\]$/.exec(result.data.path);
+    return {
+      relId: options?.relId ?? `rId${chartPathMatch?.[1] ?? "1"}`,
+      partPath: result.data.path,
+    };
+  }
+  throw new UsageError(`Add-part is not yet supported for ${format} format.`);
+}
+
+export interface RawSetResult {
+  ok: boolean;
+  affected: number;
+}
+
+export async function rawSetDocument(
+  filePath: string,
+  partPath: string,
+  xpath: string,
+  action: string,
+  xml?: string
+): Promise<RawSetResult> {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
+    const result = await rawSetExcelNode(filePath, partPath, xpath, action, xml);
+    return { ok: true, affected: result.affected };
+  }
+  if (format === "word") {
+    return rawSetWordDocument(filePath, partPath, xpath, action, xml);
+  }
+  // PowerPoint uses different signature - rawSet(filePath, pptPath, xml)
+  const result = await rawSetPpt(filePath, partPath, xml ?? "");
+  if (!result.ok) {
+    throw new OfficekitError(result.error?.message ?? "Failed to raw-set", "operation_failed");
+  }
+  return { ok: true, affected: 1 };
+}
+
+export interface MergeResult {
+  replacements: number;
+  conditionals: number;
+  loops: number;
+  slidesProcessed: number;
+  outputPath: string;
+}
+
+export async function mergeDocument(
+  templatePath: string,
+  data: MergeData,
+  outputPath: string
+): Promise<MergeResult> {
+  const format = assertFormat(templatePath);
+  if (format === "word") {
+    return mergeOpenXmlTextTemplate(templatePath, data, outputPath, (entryName) =>
+      entryName.endsWith(".xml") && (entryName.startsWith("word/") || entryName.startsWith("docProps/")),
+    );
+  }
+  if (format === "excel") {
+    return mergeOpenXmlTextTemplate(templatePath, data, outputPath, (entryName) =>
+      entryName.endsWith(".xml") && (entryName.startsWith("xl/") || entryName.startsWith("docProps/")),
+    );
+  }
+  if (format === "powerpoint") {
+    const result = await mergePpt(templatePath, data, outputPath);
+    if (!result.ok) {
+      throw new OfficekitError(result.error?.message ?? "Failed to merge", "operation_failed");
+    }
+    if (!result.data) {
+      throw new OfficekitError("Merge returned no data", "operation_failed");
+    }
+    return {
+      replacements: result.data.replacements,
+      conditionals: result.data.conditionals,
+      loops: result.data.loops,
+      slidesProcessed: result.data.slidesProcessed,
+      outputPath,
+    };
+  }
+  throw new UsageError(`Merge is not yet supported for ${format} format.`);
+}
+
+function getNestedTemplateValue(obj: Record<string, unknown>, key: string): unknown {
+  const parts = key.split(".");
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== "object") {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function formatTemplateDate(value: string | Date, format: string): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return format
+    .replace(/yyyy/g, String(year))
+    .replace(/yy/g, String(year).slice(-2))
+    .replace(/mm/g, month)
+    .replace(/dd/g, day)
+    .replace(/HH/g, hours)
+    .replace(/MM/g, minutes)
+    .replace(/SS/g, seconds);
+}
+
+function templateValueToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function processTemplatePlaceholder(expr: string, data: Record<string, unknown>): string {
+  const formatMatch = expr.match(/^([^:]+):(.+)$/);
+  if (formatMatch) {
+    const value = getNestedTemplateValue(data, formatMatch[1]);
+    if (value instanceof Date || typeof value === "string") {
+      return formatTemplateDate(value, formatMatch[2]);
+    }
+    return templateValueToString(value);
+  }
+  return templateValueToString(getNestedTemplateValue(data, expr));
+}
+
+function processTemplateConditionals(text: string, data: Record<string, unknown>) {
+  let count = 0;
+  const result = text.replace(/\{\{#if\s+([^}]+)\}\}([\s\S]*?)\{\{\/if\}\}/g, (_match, condition, content) => {
+    count += 1;
+    const value = getNestedTemplateValue(data, condition.trim());
+    const truthy = value !== false && value !== null && value !== undefined && value !== "";
+    return truthy ? content : "";
+  });
+  return { result, count };
+}
+
+function processTemplateLoops(text: string, data: Record<string, unknown>) {
+  let count = 0;
+  const result = text.replace(/\{\{#each\s+([^}]+)\}\}([\s\S]*?)\{\{\/each\}\}/g, (_match, arrayKey, content) => {
+    count += 1;
+    const array = getNestedTemplateValue(data, arrayKey.trim());
+    if (!Array.isArray(array)) {
+      return "";
+    }
+    return array.map((item) => {
+      let itemContent = content;
+      if (typeof item === "object" && item !== null) {
+        const itemData = item as Record<string, unknown>;
+        itemContent = itemContent.replace(/\{\{([^}]+)\}\}/g, (_placeholder: string, expr: string) => {
+          if (expr.startsWith("../")) {
+            return processTemplatePlaceholder(expr.slice(3), data);
+          }
+          const itemValue = getNestedTemplateValue(itemData, expr);
+          return itemValue !== undefined ? templateValueToString(itemValue) : processTemplatePlaceholder(expr, data);
+        });
+      } else {
+        itemContent = itemContent.replace(/\{\{\.\}\}/g, String(item));
+      }
+      return itemContent;
+    }).join("");
+  });
+  return { result, count };
+}
+
+function processSimpleTemplatePlaceholders(text: string, data: Record<string, unknown>) {
+  let count = 0;
+  const result = text.replace(/\{\{(?!#|\/)([^}]+)\}\}/g, (_match, expr) => {
+    count += 1;
+    return processTemplatePlaceholder(expr.trim(), data);
+  });
+  return { result, count };
+}
+
+function processTemplateText(text: string, data: Record<string, unknown>) {
+  const afterConditionals = processTemplateConditionals(text, data);
+  const afterLoops = processTemplateLoops(afterConditionals.result, data);
+  const afterPlaceholders = processSimpleTemplatePlaceholders(afterLoops.result, data);
+  return {
+    result: afterPlaceholders.result,
+    stats: {
+      replacements: afterPlaceholders.count,
+      conditionals: afterConditionals.count,
+      loops: afterLoops.count,
+    },
+  };
+}
+
+function mergeTextNodesInXml(xml: string, data: Record<string, unknown>) {
+  const stats = { replacements: 0, conditionals: 0, loops: 0 };
+  const result = xml.replace(/(<(?:\w+:)?t\b[^>]*>)([^<]*)(<\/(?:\w+:)?t>)/g, (_match, open, content, close) => {
+    if (!content.includes("{{")) {
+      return `${open}${content}${close}`;
+    }
+    const processed = processTemplateText(content, data);
+    stats.replacements += processed.stats.replacements;
+    stats.conditionals += processed.stats.conditionals;
+    stats.loops += processed.stats.loops;
+    return `${open}${escapeXml(processed.result)}${close}`;
+  });
+  return { result, stats };
+}
+
+async function mergeOpenXmlTextTemplate(
+  templatePath: string,
+  data: MergeData,
+  outputPath: string,
+  shouldProcessEntry: (entryName: string) => boolean,
+): Promise<MergeResult> {
+  const zip = readStoredZip(await readFile(templatePath));
+  let replacements = 0;
+  let conditionals = 0;
+  let loops = 0;
+  let processedEntries = 0;
+  const updatedEntries: Array<{ name: string; data: Buffer }> = [];
+
+  for (const [name, value] of zip.entries()) {
+    if (shouldProcessEntry(name)) {
+      const xml = value.toString("utf8");
+      const processed = mergeTextNodesInXml(xml, data);
+      replacements += processed.stats.replacements;
+      conditionals += processed.stats.conditionals;
+      loops += processed.stats.loops;
+      if (processed.stats.replacements || processed.stats.conditionals || processed.stats.loops) {
+        processedEntries += 1;
+      }
+      updatedEntries.push({ name, data: Buffer.from(processed.result, "utf8") });
+      continue;
+    }
+    updatedEntries.push({ name, data: value });
+  }
+
+  await writeFile(outputPath, createStoredZip(updatedEntries));
+  return {
+    replacements,
+    conditionals,
+    loops,
+    slidesProcessed: processedEntries || 1,
+    outputPath,
+  };
 }
 
 export async function getDocumentNode(filePath: string, targetPath: string) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return getExcelNode(filePath, targetPath);
+  }
+  if (format === "word") {
+    return getWordNode(filePath, targetPath);
+  }
+  if (format === "powerpoint") {
+    // Use getSlides to get slide information
+    const result = await getSlides(filePath);
+    if (!result.ok) {
+      throw new OfficekitError(result.error?.message ?? "Failed to get slides", "operation_failed");
+    }
+    const data = result.data;
+    if (!data) throw new OfficekitError("No data returned", "operation_failed");
+    // If requesting root, return all slides
+    if (targetPath === "/" || targetPath === "") {
+      return { ok: true, slides: data.slides, total: data.total };
+    }
+    // Parse /slide[n] path
+    const slideMatch = /^\/slide\[(\d+)\]$/.exec(targetPath);
+    if (slideMatch) {
+      const index = Number(slideMatch[1]);
+      if (index < 1 || index > data.slides.length) {
+        throw new OfficekitError(`Slide ${index} does not exist`, "not_found");
+      }
+      // Use getSlide to get full slide model with title, shapes, layout, theme
+      const slideResult = await getSlide(filePath, index);
+      if (!slideResult.ok) {
+        throw new OfficekitError(slideResult.error?.message ?? "Failed to get slide", "operation_failed");
+      }
+      const slide = slideResult.data!;
+      let skippedTitleShape = false;
+      return {
+        ...slide,
+        layoutName: slide.layout,
+        shapes: slide.shapes
+          .filter((shape) => (shape.text ?? "").trim().length > 0)
+          .filter((shape) => {
+            if (!skippedTitleShape && shape.text === slide.title) {
+              skippedTitleShape = true;
+              return false;
+            }
+            return true;
+          })
+          .map((shape) => ({
+            text: shape.text,
+            name: shape.name,
+            kind: shape.placeholderType,
+          })),
+      };
+    }
+    throw new UsageError("PowerPoint get supports / or /slide[n].");
   }
   const document = await loadDocument(filePath);
   return materializePath(document, targetPath);
 }
 
 export async function queryDocumentNodes(filePath: string, selector: string) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return queryExcelNodesFromAdapter(filePath, selector);
+  }
+  if (format === "word") {
+    return queryWordNodes(filePath, selector);
+  }
+  if (format === "powerpoint") {
+    const result = await getSlides(filePath);
+    if (!result.ok) {
+      throw new OfficekitError(result.error?.message ?? "Failed to query slides", "operation_failed");
+    }
+    const data = result.data;
+    if (!data) throw new OfficekitError("No data returned", "operation_failed");
+    // Return paths for all slides
+    return data.slides.map((slide) => ({
+      ok: true as const,
+      path: `/slide[${slide.index}]`,
+      slide,
+    }));
   }
   const document = await loadDocument(filePath);
   return [materializePath(document, selector)];
 }
 
 export async function viewDocument(filePath: string, mode: string) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return viewExcelDocument(filePath, mode);
+  }
+  if (format === "word") {
+    return viewWordDocument(filePath, mode);
+  }
+  if (format === "powerpoint") {
+    const normalizedMode = mode.toLowerCase();
+    if (normalizedMode === "text") {
+      const result = await viewAsText(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as text", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      const lines = [`Slides: ${data.slideCount}`, ""];
+      for (const slide of data.slides) {
+        lines.push(`--- Slide ${slide.index} ---`);
+        for (const shape of slide.shapes) {
+          if (shape.text) lines.push(shape.text);
+        }
+        lines.push("");
+      }
+      return { mode, output: lines.join("\n") };
+    }
+    if (normalizedMode === "annotated") {
+      const result = await viewAsAnnotated(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as annotated", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      const lines = [`Slides: ${data.slideCount}`, ""];
+      for (const slide of data.slides) {
+        lines.push(`--- Slide ${slide.index} ---`);
+        for (const el of slide.elements) {
+          lines.push(`${el.type}: ${el.textPreview ?? "(no text)"}`);
+        }
+        lines.push("");
+      }
+      return { mode, output: lines.join("\n") };
+    }
+    if (normalizedMode === "outline") {
+      const result = await viewAsOutline(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as outline", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      const lines = [`Slides: ${data.slideCount}`, ""];
+      for (const slide of data.slides) {
+        lines.push(`--- Slide ${slide.index}: ${slide.title ?? "(no title)"} ---`);
+        for (const item of slide.content) {
+          lines.push(`  ${item.description}`);
+        }
+        lines.push("");
+      }
+      return { mode, output: lines.join("\n") };
+    }
+    if (normalizedMode === "stats") {
+      const result = await viewAsStats(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as stats", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      const lines = [
+        `Slides: ${data.slideCount}`,
+        `Shapes: ${data.shapeCount}`,
+        `Text length: ${data.textLength}`,
+        `Tables: ${data.tableCount}`,
+        `Charts: ${data.chartCount}`,
+        `Pictures: ${data.pictureCount}`,
+        `Media: ${data.mediaCount}`,
+      ];
+      return { mode, output: lines.join("\n") };
+    }
+    if (normalizedMode === "issues") {
+      const result = await viewAsIssues(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as issues", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      const lines = [`Issues found: ${data.issueCount}`, ""];
+      for (const issue of data.issues) {
+        lines.push(`[${issue.severity}] ${issue.message}`);
+      }
+      return { mode, output: lines.join("\n") };
+    }
+    if (normalizedMode === "html") {
+      const result = await viewAsHtml(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as html", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      return { mode, output: data.html };
+    }
+    if (normalizedMode === "svg") {
+      const result = await viewAsSvg(filePath);
+      if (!result.ok) {
+        throw new OfficekitError(result.error?.message ?? "Failed to view as svg", "operation_failed");
+      }
+      const data = result.data;
+      if (!data) throw new OfficekitError("No data returned", "operation_failed");
+      return { mode, output: data.svg };
+    }
+    throw new UsageError(`Unsupported PowerPoint view mode '${mode}'.`, "Use: text, annotated, outline, stats, issues, html, or svg.");
   }
   const document = await loadDocument(filePath);
   if (mode === "html") {
@@ -303,8 +900,12 @@ export async function viewDocument(filePath: string, mode: string) {
 }
 
 export async function checkDocument(filePath: string) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return summarizeExcelCheck(filePath);
+  }
+  if (format === "word") {
+    return validateWordDocument(filePath);
   }
   const document = await loadDocument(filePath);
   return {
@@ -314,13 +915,85 @@ export async function checkDocument(filePath: string) {
   };
 }
 
+/**
+ * Unified document validation interface.
+ */
+export interface ValidationResult {
+  valid: boolean;
+  format: SupportedFormat;
+  errors: Array<{
+    errorType: string;
+    description: string;
+    part?: string;
+    path?: string;
+  }>;
+}
+
+/**
+ * Validates a document against OpenXML schema.
+ * Returns validation errors if any.
+ */
+export async function validateDocument(filePath: string): Promise<ValidationResult> {
+  const format = assertFormat(filePath);
+
+  if (format === "word") {
+    const errors = await validateWordDocument(filePath);
+    return {
+      valid: errors.length === 0,
+      format,
+      errors: errors.map(e => ({
+        errorType: e.errorType,
+        description: e.description,
+        part: e.part,
+        path: e.path,
+      })),
+    };
+  }
+
+  if (format === "excel") {
+    const result = await validateExcelDocument(filePath);
+    return {
+      valid: result.errors.length === 0,
+      format,
+      errors: result.errors.map(e => ({
+        errorType: "validation_error",
+        description: e.message,
+        part: e.path,
+      })),
+    };
+  }
+
+  if (format === "powerpoint") {
+    const errors = await validatePptDocument(filePath);
+    return {
+      valid: errors.length === 0,
+      format,
+      errors: errors.map(e => ({
+        errorType: e.errorType,
+        description: e.description,
+        part: e.part,
+        path: e.path,
+      })),
+    };
+  }
+
+  throw new UsageError(`Unsupported format '${format}' for validation.`);
+}
+
 export async function rawDocument(filePath: string, options: RawDocumentOptions = {}) {
-  if (assertFormat(filePath) === "excel") {
+  const format = assertFormat(filePath);
+  if (format === "excel") {
     return rawExcelDocument(filePath, options.partPath ?? "/", {
       startRow: options.startRow,
       endRow: options.endRow,
       cols: options.cols,
     });
+  }
+  if (format === "word") {
+    if (!options.partPath) {
+      return JSON.stringify(await loadDocument(filePath), null, 2);
+    }
+    return rawWordDocument(filePath, options.partPath ?? "/");
   }
   const document = await loadDocument(filePath);
   return JSON.stringify(document, null, 2);
@@ -685,19 +1358,139 @@ function stampDocument(document: OfficekitDocument) {
   document.updatedAt = new Date().toISOString();
 }
 
-async function persistDocument(filePath: string, document: OfficekitDocument) {
+export async function persistDocument(filePath: string, document: OfficekitDocument) {
   await mkdir(path.dirname(filePath), { recursive: true });
   const entries = buildDocumentEntries(document);
   await writeFile(filePath, createStoredZip(entries));
 }
 
-async function loadDocument(filePath: string): Promise<OfficekitDocument> {
+export async function loadDocument(filePath: string): Promise<OfficekitDocument> {
   const zip = readStoredZip(await readFile(filePath));
   const metadata = zip.get(METADATA_PATH);
   if (!metadata) {
     return parseExternalDocument(zip, filePath);
   }
   return normalizeDocument(JSON.parse(metadata.toString("utf8")) as OfficekitDocument);
+}
+
+export async function hasResidentSession(filePath: string): Promise<boolean> {
+  const session = await readSessionRecord("resident", filePath);
+  return session?.socketPath != null;
+}
+
+interface ResidentResponse {
+  id: string;
+  ok: boolean;
+  data?: unknown;
+  error?: string;
+}
+
+function requestToResident(socketPath: string, request: object): Promise<ResidentResponse> {
+  return new Promise((resolve, reject) => {
+    // Parse tcp://host:port or use as-is for Unix socket
+    let host: string;
+    let port: number;
+
+    if (socketPath.startsWith("tcp://")) {
+      const url = new URL(socketPath);
+      host = url.hostname || "127.0.0.1";
+      port = parseInt(url.port || "0", 10);
+    } else {
+      // Unix socket path
+      host = socketPath;
+      port = 0;
+    }
+
+    const socket = createConnection({ host, port, timeout: 5000 }, () => {
+      socket.write(JSON.stringify(request) + "\n");
+    });
+
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split("\n");
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const response = JSON.parse(line) as ResidentResponse;
+          socket.end();
+          resolve(response);
+          return;
+        } catch {
+          // Continue buffering
+        }
+      }
+    });
+
+    socket.on("error", (err) => {
+      reject(err);
+    });
+
+    socket.setTimeout(5000, () => {
+      socket.destroy();
+      reject(new Error("Resident session request timed out"));
+    });
+  });
+}
+
+export async function getResidentDocument(filePath: string, targetPath: string): Promise<OfficekitDocument | unknown> {
+  const session = await readSessionRecord("resident", filePath);
+  if (!session?.socketPath) {
+    throw new OfficekitError("No resident session found", "no_session");
+  }
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const response = await requestToResident(session.socketPath, {
+    id,
+    command: "get",
+    targetPath,
+  });
+
+  if (!response.ok) {
+    throw new OfficekitError(response.error ?? "Failed to get from resident", "resident_error");
+  }
+
+  return response.data;
+}
+
+export async function queryResidentDocument(filePath: string, targetPath: string): Promise<unknown> {
+  const session = await readSessionRecord("resident", filePath);
+  if (!session?.socketPath) {
+    throw new OfficekitError("No resident session found", "no_session");
+  }
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const response = await requestToResident(session.socketPath, {
+    id,
+    command: "query",
+    targetPath,
+  });
+
+  if (!response.ok) {
+    throw new OfficekitError(response.error ?? "Failed to query resident", "resident_error");
+  }
+
+  return response.data;
+}
+
+export async function viewResidentDocument(filePath: string, mode: string): Promise<{ output: string }> {
+  const session = await readSessionRecord("resident", filePath);
+  if (!session?.socketPath) {
+    throw new OfficekitError("No resident session found", "no_session");
+  }
+
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const response = await requestToResident(session.socketPath, {
+    id,
+    command: "view",
+    mode,
+  });
+
+  if (!response.ok) {
+    throw new OfficekitError(response.error ?? "Failed to view resident", "resident_error");
+  }
+
+  return response.data as { output: string };
 }
 
 function buildDocumentEntries(document: OfficekitDocument) {
@@ -738,7 +1531,7 @@ function buildDocumentEntries(document: OfficekitDocument) {
   ];
 }
 
-function materializePath(document: OfficekitDocument, targetPath: string) {
+export function materializePath(document: OfficekitDocument, targetPath: string) {
   if (targetPath === "/" || targetPath === "") {
     return document;
   }

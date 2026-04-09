@@ -29,11 +29,12 @@ test('docs helpers expose help topics and command families', () => {
   assert.equal(createLane4StatusReport().every((entry) => entry.status === 'scaffolded'), true);
 });
 
-test('root README and SKILL keep the lineage statement visible', () => {
+test('root README and SKILL have no officecli references', () => {
   const readme = readFileSync(resolve(repoRoot, 'README.md'), 'utf8');
   const skill = readFileSync(resolve(repoRoot, 'SKILL.md'), 'utf8');
 
-  assert.match(readme, /this version is migrated from OfficeCLI/i);
-  assert.match(skill, /Node\.js \+ Bun migration of OfficeCLI/i);
-  assert.match(readme, /command compatibility with `officecli` is \*\*not\*\* a goal/i);
+  assert.ok(!/officecli/i.test(readme), 'README should not reference officecli');
+  assert.ok(!/officecli/i.test(skill), 'SKILL should not reference officecli');
+  assert.ok(readme.includes('officekit'), 'README should reference officekit');
+  assert.ok(skill.includes('officekit'), 'SKILL should reference officekit');
 });

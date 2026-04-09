@@ -48,6 +48,7 @@ const SEGMENT_PATTERNS = {
   INDEXED: /^\/([a-zA-Z]+)\[(\d+)\](.*)$/,
   NAMED: /^\/([a-zA-Z]+)\[([a-zA-Z][a-zA-Z0-9_]*)\](.*)$/,
   ATTRIBUTE: /^\/([a-zA-Z]+)\[@([a-zA-Z]+)=([^\]]+)\](.*)$/,
+  CELL: /^\/(cell)\[(\d+),(\d+)\](.*)$/,
 } as const;
 
 const VALID_ROOT_SEGMENTS = new Set([
@@ -120,7 +121,7 @@ export function parsePath(path: string): Result<ParsedPath> {
   while (remaining.length > 0 && remaining !== "/") {
     const segmentResult = parseSegment(remaining);
     if (!segmentResult.ok) {
-      return segmentResult;
+      return err(segmentResult.error?.code ?? "invalid_path", segmentResult.error?.message ?? "Failed to parse segment");
     }
 
     const { segment, rest } = segmentResult.data as { segment: PathSegment; rest: string };
@@ -183,6 +184,18 @@ function parseSegment(path: string): Result<{ segment: PathSegment; rest: string
 
     return ok({
       segment: { name, stringIndex: nameSelector },
+      rest,
+    });
+  }
+
+  match = path.match(SEGMENT_PATTERNS.CELL);
+  if (match) {
+    const name = "cell";
+    const rowCol = `${match[2]},${match[3]}`;
+    const rest = match[4] || "";
+
+    return ok({
+      segment: { name, stringIndex: rowCol },
       rest,
     });
   }
