@@ -869,7 +869,19 @@ export class FormulaEvaluator {
         }
         return FormulaResult.Number(count);
       }
-      case "COUNTBLANK": return FormulaResult.Number(0);
+      case "COUNTBLANK": {
+        let count = 0;
+        for (const a of args) {
+          if (a instanceof RangeData) {
+            for (const cell of a.toFlatResults()) {
+              if (cell === null || (cell.asString() === "" && !cell.isNumeric && !cell.isBool && !cell.isError)) count++;
+            }
+          } else if (a instanceof FormulaResult) {
+            if (a.asString() === "" && !a.isNumeric && !a.isBool && !a.isError) count++;
+          }
+        }
+        return FormulaResult.Number(count);
+      }
       case "MIN": {
         const a = nums();
         return a.length > 0 ? FormulaResult.Number(Math.min(...a)) : FormulaResult.Number(0);
@@ -1158,6 +1170,7 @@ export class FormulaEvaluator {
       case "HEX2OCT": return FormulaResult.Str(parseInt(str(0), 16).toString(8));
       case "OCT2BIN": return FormulaResult.Str(parseInt(str(0), 8).toString(2));
       case "OCT2HEX": return FormulaResult.Str(parseInt(str(0), 8).toString(16).toUpperCase());
+      case "CONVERT": return this.evalConvert(args);
 
       default:
         return null;
@@ -1749,6 +1762,82 @@ export class FormulaEvaluator {
     const d1 = args[0] instanceof FormulaResult ? this.oaDateToDate(args[0].asNumber()) : new Date();
     const d2 = args[1] instanceof FormulaResult ? this.oaDateToDate(args[1].asNumber()) : new Date();
     return FormulaResult.Number(Math.abs((d2.getTime() - d1.getTime()) / 31557600000));
+  }
+
+  private evalConvert(args: unknown[]): FormulaResult | null {
+    if (args.length < 3) return null;
+    const value = args[0] instanceof FormulaResult ? args[0].asNumber() : 0;
+    const fromUnit = args[1] instanceof FormulaResult ? args[1].asString().trim().toLowerCase() : "";
+    const toUnit = args[2] instanceof FormulaResult ? args[2].asString().trim().toLowerCase() : "";
+    if (!fromUnit || !toUnit) return null;
+
+    const linearConversions: Record<string, number> = {
+      m: 1,
+      meter: 1,
+      meters: 1,
+      km: 1000,
+      mi: 1609.344,
+      mile: 1609.344,
+      miles: 1609.344,
+      ft: 0.3048,
+      foot: 0.3048,
+      feet: 0.3048,
+      in: 0.0254,
+      inch: 0.0254,
+      cm: 0.01,
+      mm: 0.001,
+      kg: 1,
+      kilogram: 1,
+      g: 0.001,
+      gram: 0.001,
+      lbm: 0.45359237,
+      lb: 0.45359237,
+      pound: 0.45359237,
+    };
+
+    const toKelvin = (unit: string, input: number) => {
+      switch (unit) {
+        case "c":
+        case "celsius":
+          return input + 273.15;
+        case "f":
+        case "fahrenheit":
+          return (input - 32) * 5 / 9 + 273.15;
+        case "k":
+        case "kelvin":
+          return input;
+        default:
+          return undefined;
+      }
+    };
+
+    const fromKelvin = (unit: string, kelvin: number) => {
+      switch (unit) {
+        case "c":
+        case "celsius":
+          return kelvin - 273.15;
+        case "f":
+        case "fahrenheit":
+          return (kelvin - 273.15) * 9 / 5 + 32;
+        case "k":
+        case "kelvin":
+          return kelvin;
+        default:
+          return undefined;
+      }
+    };
+
+    if (fromUnit in linearConversions && toUnit in linearConversions) {
+      return FormulaResult.Number((value * linearConversions[fromUnit]) / linearConversions[toUnit]);
+    }
+
+    const kelvin = toKelvin(fromUnit, value);
+    if (kelvin !== undefined) {
+      const converted = fromKelvin(toUnit, kelvin);
+      return converted !== undefined ? FormulaResult.Number(converted) : FormulaResult.Error("#N/A");
+    }
+
+    return FormulaResult.Error("#N/A");
   }
 
   // ==================== Financial ====================

@@ -95,6 +95,17 @@ officekit check presentation.pptx
 officekit watch demo.docx
 officekit watch spreadsheet.xlsx
 officekit watch presentation.pptx
+officekit unwatch demo.docx
+
+# 驻留会话
+officekit open demo.docx
+officekit set demo.docx /body/p[1] --prop "text=Updated in resident mode"
+officekit close demo.docx
+
+# 原始 XML / 模板 / 部件
+officekit raw-set demo.docx /document --xpath "//w:body" --action append --xml "<w:p><w:r><w:t>Hello</w:t></w:r></w:p>"
+officekit add-part demo.pptx /slide[1] --type chart --prop "title=Quarterly"
+officekit merge template.xlsx output.xlsx --data '{"name":"Alice"}'
 
 # 获取帮助
 officekit help
@@ -138,9 +149,15 @@ const slide = await getSlide("presentation.pptx", 1);
 | `copy <file> --from <source>` | 复制节点 |
 | `batch <file> <operations>` | 批量操作 |
 | `raw <file>` | 查看原始 XML |
+| `raw-set <file> <part>` | 通过 XPath 修改原始 XML |
+| `add-part <file> <path>` | 添加图表、页眉、页脚等文档部件 |
+| `merge <template> <output>` | 将 JSON 数据合并到模板文档 |
 | `validate <file>` | OpenXML 架构验证 |
 | `check <file>` | 检查布局/结构问题 |
 | `watch <file>` | 启动实时预览服务器 |
+| `unwatch <file>` | 停止活动中的实时预览会话 |
+| `open <file>` | 打开驻留会话以复用文档状态 |
+| `close <file>` | 关闭驻留会话并持久化更改 |
 | `about` | 显示版本信息 |
 | `contracts` | 显示功能合同摘要 |
 
@@ -159,6 +176,20 @@ officekit watch slides.pptx  # PowerPoint 预览
 - 形状/表格渲染
 - 图表显示
 - SSE 推送更新
+- `unwatch` 显式结束活跃预览会话
+
+## 驻留会话
+
+`open` / `close` 提供了驻留式工作流，可以在多次命令之间复用当前文档状态：
+
+```bash
+officekit open report.docx
+officekit add report.docx /body --type paragraph --prop "text=Cached edit"
+officekit set report.docx /body/p[1] --prop "bold=true"
+officekit close report.docx
+```
+
+这条链路适合低延迟的多步编辑，也和实时预览/批处理形成互补。
 
 ## 路径语法
 

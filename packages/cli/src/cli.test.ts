@@ -905,9 +905,10 @@ describe("officekit CLI scaffold", () => {
     await runCli(["set", filePath, "/Sheet1/D16", "--prop", "formula==WORKDAY_INTL(44204,5,1)"]);
     await runCli(["set", filePath, "/Sheet1/D17", "--prop", "formula==YEARFRAC(44204,44234)"]);
     await runCli(["set", filePath, "/Sheet1/D18", "--prop", "formula==PMT(0.1/12,12,-1200)"]);
+    await runCli(["set", filePath, "/Sheet1/D19", "--prop", "formula==CONVERT(1,\"lbm\",\"kg\")"]);
 
     const values = await Promise.all(
-      Array.from({ length: 18 }, (_, index) => runCli(["get", filePath, `/Sheet1/D${index + 1}`, "--json"])),
+      Array.from({ length: 19 }, (_, index) => runCli(["get", filePath, `/Sheet1/D${index + 1}`, "--json"])),
     );
     const textView = await runCli(["view", filePath, "text"]);
 
@@ -929,6 +930,7 @@ describe("officekit CLI scaffold", () => {
     expect(values[15].stdout).toContain('"evaluatedValue": "44210"');
     expect(values[16].stdout).toContain('"evaluatedValue": "0.08213552361396304"');
     expect(values[17].stdout).toContain('"evaluatedValue": "100"');
+    expect(values[18].stdout).toContain('"evaluatedValue": "0.45359237"');
     expect(textView.stdout).toContain("[/Sheet1/row[8]] two");
     expect(textView.stdout).toContain("[/Sheet1/row[9]] blue");
     expect(textView.stdout).toContain("[/Sheet1/row[11]] Helxo");
@@ -981,6 +983,10 @@ describe("officekit CLI scaffold", () => {
       "--prop",
       "chartfill=E2E8F0",
       "--prop",
+      "seriesLineWidth=2.5",
+      "--prop",
+      "seriesDash=dash",
+      "--prop",
       "style=12",
     ]);
 
@@ -1001,6 +1007,8 @@ describe("officekit CLI scaffold", () => {
     expect(rawChart.stdout).toContain('<c:minorUnit val="5"');
     expect(rawChart.stdout).toContain('formatCode="0.0"');
     expect(rawChart.stdout).toContain('<c:style val="12"');
+    expect(rawChart.stdout).toContain('<a:ln w="31750">');
+    expect(rawChart.stdout).toContain('<a:prstDash val="dash"/>');
     expect(rawChart.stdout).toContain('srgbClr val="FF0000"');
     expect(rawChart.stdout).toContain('srgbClr val="F1F5F9"');
     expect(rawChart.stdout).toContain('srgbClr val="E2E8F0"');
@@ -1753,7 +1761,7 @@ describe("officekit CLI scaffold", () => {
     await runCli(["create", filePath]);
     await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Watching"]);
 
-    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0"], {
+    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0", "--no-open"], {
       cwd: path.resolve(import.meta.dir, "../../.."),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -1780,7 +1788,7 @@ describe("officekit CLI scaffold", () => {
     await runCli(["create", filePath]);
     await runCli(["add", filePath, "/body", "--type", "paragraph", "--prop", "text=Watching"]);
 
-    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0"], {
+    const child = spawn(process.execPath, ["run", "packages/cli/bin/officekit", "watch", filePath, "--port", "0", "--no-open"], {
       cwd: path.resolve(import.meta.dir, "../../.."),
       stdio: ["ignore", "pipe", "pipe"],
     });
